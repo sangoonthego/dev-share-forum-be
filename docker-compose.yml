@@ -1,0 +1,17 @@
+services:
+  db:
+    image: ankane/pgvector:latest
+    platform: linux/amd64
+    container_name: devshare_postgres
+    restart: always
+    ports:
+      - "5432:5432"
+    environment:
+      POSTGRES_USER: postgres
+      POSTGRES_PASSWORD: mysecretpassword
+      POSTGRES_DB: devshare_forum_db
+    volumes:
+      - pgdata:/var/lib/postgresql/data # Sử dụng đặt tên volume để Docker tự quản lý
+
+volumes:
+  pgdata: # Khai báo volume ở đây
