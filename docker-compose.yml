@@ -7,11 +7,11 @@ services:
     ports:
       - "5432:5432"
     environment:
-      POSTGRES_USER: postgres
-      POSTGRES_PASSWORD: mysecretpassword
-      POSTGRES_DB: devshare_forum_db
+      POSTGRES_USER: ${DB_USER}
+      POSTGRES_PASSWORD: ${DB_PASSWORD}
+      POSTGRES_DB: ${DB_NAME}
     volumes:
-      - pgdata:/var/lib/postgresql/data # Sử dụng đặt tên volume để Docker tự quản lý
+      - pgdata:/var/lib/postgresql/data 
 
 volumes:
-  pgdata: # Khai báo volume ở đây
+  pgdata: 
