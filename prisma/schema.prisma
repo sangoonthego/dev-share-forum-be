@@ -13,6 +13,19 @@ enum UserRole {
   USER
 }
 
+model refresh_tokens {
+  id         Int      @id @default(autoincrement())
+  token      String   @unique // Hashed token
+  user_id    Int      @unique
+  user       users    @relation(fields: [user_id], references: [id], onDelete: Cascade)
+  expires_at DateTime
+  is_revoked Boolean  @default(false)
+  created_at DateTime @default(now())
+
+  @@index([user_id])
+  @@map("refresh_tokens")
+}
+
 model users {
   id            Int       @id @default(autoincrement())
   email         String    @unique
@@ -20,13 +33,17 @@ model users {
   password_hash String
   role          UserRole  @default(USER)
   phone         String?
+  profile_avatar String?  // Avatar URL/path
   karma         Int       @default(0)
+  token_version Int       @default(1) // For password change revocation
   meta          Json?     @default("{}")
   created_at    DateTime  @default(now())
   updated_at    DateTime  @updatedAt
 
   posts    posts[]
   comments comments[]
+  refresh_tokens refresh_tokens[]
+  login_audits login_audits[]
 
   @@map("users")
 }
@@ -92,4 +109,25 @@ model posts_tags {
 
   @@id([post_id, tag_id])
   @@map("posts_tags")
+}
+
+enum LoginStatus {
+  SUCCESS
+  FAILED
+  BLOCKED // Rate limit
+}
+
+model login_audits {
+  id        Int         @id @default(autoincrement())
+  user_id   Int?        // Nullable - for failed login attempts
+  user      users?      @relation(fields: [user_id], references: [id], onDelete: SetNull)
+  status    LoginStatus @default(SUCCESS)
+  ip_address String?
+  user_agent String?
+  attempted_email String? // For tracking failed login attempts
+  created_at DateTime   @default(now())
+
+  @@index([user_id])
+  @@index([created_at])
+  @@map("login_audits")
 }
