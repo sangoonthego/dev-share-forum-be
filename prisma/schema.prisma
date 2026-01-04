@@ -1,15 +1,95 @@
-// This is your Prisma schema file,
-// learn more about it in the docs: https://pris.ly/d/prisma-schema
-
-// Looking for ways to speed up your queries, or scale easily with your serverless or edge functions?
-// Try Prisma Accelerate: https://pris.ly/cli/accelerate-init
-
 generator client {
-  provider = "prisma-client-js"
+  provider        = "prisma-client-js"
   previewFeatures = ["postgresqlExtensions"]
 }
 
 datasource db {
-  provider = "postgresql"
+  provider   = "postgresql"
   extensions = [pgvector(map: "vector")]
+}
+
+enum UserRole {
+  ADMIN
+  USER
+}
+
+model users {
+  id            Int       @id @default(autoincrement())
+  email         String    @unique
+  full_name     String?
+  password_hash String
+  role          UserRole  @default(USER)
+  phone         String?
+  karma         Int       @default(0)
+  meta          Json?     @default("{}")
+  created_at    DateTime  @default(now())
+  updated_at    DateTime  @updatedAt
+
+  posts    posts[]
+  comments comments[]
+
+  @@map("users")
+}
+
+model posts {
+  id               Int      @id @default(autoincrement())
+  title            String
+  slug             String   @unique
+  content_markdown String
+  is_published     Boolean  @default(false)
+  view_count       Int      @default(0)
+  
+  // Hỗ trợ AI Search (Vector 768 dimensions - chuẩn của model embedding phổ biến)
+  embedding        Unsupported("vector(768)")? 
+
+  author_id Int
+  author    users @relation(fields: [author_id], references: [id])
+
+  created_at DateTime @default(now())
+  updated_at DateTime @updatedAt
+
+  comments    comments[]
+  posts_tags  posts_tags[]
+
+  @@map("posts")
+}
+
+model comments {
+  id        Int    @id @default(autoincrement())
+  content   String
+  
+  post_id   Int
+  post      posts @relation(fields: [post_id], references: [id])
+
+  author_id Int
+  author    users @relation(fields: [author_id], references: [id])
+
+  parent_id Int?
+  parent    comments? @relation("CommentReplies", fields: [parent_id], references: [id])
+  replies   comments[] @relation("CommentReplies")
+
+  created_at DateTime @default(now())
+  updated_at DateTime @updatedAt
+
+  @@map("comments")
+}
+
+model tags {
+  id          Int          @id @default(autoincrement())
+  name        String       @unique
+  slug        String       @unique
+  description String?
+  posts_tags  posts_tags[]
+
+  @@map("tags")
+}
+
+model posts_tags {
+  post_id Int
+  tag_id  Int
+  post    posts @relation(fields: [post_id], references: [id])
+  tag     tags  @relation(fields: [tag_id], references: [id])
+
+  @@id([post_id, tag_id])
+  @@map("posts_tags")
 }
