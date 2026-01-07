@@ -152,4 +152,32 @@ export class RedisService {
       return false;
     }
   }
+
+  /**
+   * Scan keys matching a pattern and delete them
+   * Uses SCAN for memory-efficient pattern matching
+   */
+  async delByPattern(pattern: string): Promise<number> {
+    let cursor = '0';
+    let deletedCount = 0;
+
+    try {
+      do {
+        const [newCursor, keys] = await (this.redis as any).scan(
+          cursor,
+          'MATCH',
+          pattern,
+        );
+        cursor = newCursor;
+
+        if (keys && keys.length > 0) {
+          deletedCount += await (this.redis as any).del(...keys);
+        }
+      } while (cursor !== '0');
+    } catch (error) {
+      console.error(`Error deleting keys matching pattern ${pattern}:`, error);
+    }
+
+    return deletedCount;
+  }
 }

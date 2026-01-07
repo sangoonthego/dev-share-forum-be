@@ -1,8 +1,10 @@
 import { NestFactory } from '@nestjs/core';
 import { AppModule } from './app.module';
 import { ValidationPipe, Logger } from '@nestjs/common';
+import { Reflector } from '@nestjs/core';
 import cookieParser from 'cookie-parser';
 import { GlobalExceptionFilter } from './common/filters/http-exception.filter';
+import { AtGuard } from './common/guards/at.guard';
 
 async function bootstrap() {
   const logger = new Logger('Bootstrap');
@@ -35,7 +37,15 @@ async function bootstrap() {
   );
 
   // ═══════════════════════════════════════════════════════════════════════
-  // 4. CORS CONFIGURATION - Allow frontend to send cookies
+  // 4. GLOBAL AUTHENTICATION GUARD - Require JWT for all routes except @Public()
+  // ═══════════════════════════════════════════════════════════════════════
+  // AtGuard checks @Public() decorator and bypasses if present
+  // This protects all routes by default, allowing public routes via @Public()
+  const reflector = app.get(Reflector);
+  app.useGlobalGuards(new AtGuard(reflector));
+
+  // ═══════════════════════════════════════════════════════════════════════
+  // 5. CORS CONFIGURATION - Allow frontend to send cookies
   // ═══════════════════════════════════════════════════════════════════════
   // Critical: credentials: true allows httpOnly cookies to be sent
   app.enableCors({
@@ -46,7 +56,7 @@ async function bootstrap() {
   });
 
   // ═══════════════════════════════════════════════════════════════════════
-  // 5. SECURITY HEADERS - Prevent common attacks
+  // 6. SECURITY HEADERS - Prevent common attacks
   // ═══════════════════════════════════════════════════════════════════════
   app.use((req, res, next) => {
     // Prevent clickjacking
@@ -77,8 +87,9 @@ async function bootstrap() {
   logger.log(`🚀 DevShare Lite API`);
   logger.log(`📍 http://localhost:${port}`);
   logger.log(`📦 Security: Enabled (CORS, CSRF, Headers)`);
-  logger.log(`🔐 Auth: JWT + Redis Blacklist`);
+  logger.log(`🔐 Auth: JWT + Redis Blacklist + Global AtGuard`);
   logger.log(`💾 Storage: Redis (RT) + PostgreSQL (User Data)`);
+  logger.log(`📝 Posts: Atomic Creation, Caching, Ownership Verification`);
   logger.log(`━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━`);
 }
 
