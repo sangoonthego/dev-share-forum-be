@@ -72,33 +72,47 @@ export class RedisService {
   }
 
   /**
-   * Store failed login attempt (for rate limiting analytics)
+   * Store failed login attempt (for rate limiting)
+   * Increments counter with 15-minute auto-expiry
    */
-  async recordFailedLogin(email: string, ip: string): Promise<number> {
-    const key = `failed_login:${email}:${ip}`;
+  async incrementFailedLogin(key: string, expiresIn: number = 900): Promise<number> {
     const attempts = await this.redis.incr(key);
-    // Auto-expire after 15 minutes
+    // Auto-expire after TTL
     if (attempts === 1) {
-      await this.redis.expire(key, 15 * 60);
+      await this.redis.expire(key, expiresIn);
     }
     return attempts;
   }
 
   /**
-   * Get failed login count
+   * Get failed login count for email:ip
    */
-  async getFailedLoginCount(email: string, ip: string): Promise<number> {
-    const key = `failed_login:${email}:${ip}`;
+  async getFailedLoginCount(key: string): Promise<number> {
     const count = await this.redis.get(key);
     return count ? parseInt(count) : 0;
   }
 
   /**
-   * Clear failed login attempts (after successful login)
+   * Clear failed login attempts (called after successful login)
    */
-  async clearFailedLogin(email: string, ip: string): Promise<void> {
-    const key = `failed_login:${email}:${ip}`;
+  async clearFailedLogin(key: string): Promise<void> {
     await this.redis.del(key);
+  }
+
+  /**
+   * Set last login timestamp for a user
+   */
+  async setLastLogin(key: string, timestamp: string, expiresIn: number): Promise<void> {
+    await this.redis.setex(key, expiresIn, timestamp);
+  }
+
+  /**
+   * Record failed login attempt (for rate limiting analytics)
+   * @deprecated Use incrementFailedLogin instead
+   */
+  async recordFailedLogin(email: string, ip: string): Promise<number> {
+    const key = `failed_login:${email}:${ip}`;
+    return await this.incrementFailedLogin(key, 15 * 60);
   }
 
   /**
