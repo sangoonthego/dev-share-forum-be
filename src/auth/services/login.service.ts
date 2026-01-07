@@ -57,15 +57,16 @@ export class LoginService {
       user.token_version,
     );
 
-    await this.tokenService.updateRtHash(user.id, tokens.refresh_token);
-
-    // Log successful login
+    // Log successful login + clear failed attempts from Redis
     await this.auditService.logLoginAttempt(
       user.id,
       LoginStatus.SUCCESS,
       ipAddress,
       userAgent,
     );
+
+    // Clear rate limit counter after successful login
+    await this.auditService.clearFailedAttempts(user.email, ipAddress);
 
     return tokens;
   }
