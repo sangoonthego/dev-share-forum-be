@@ -3,7 +3,6 @@ import type { Response, Request } from "express";
 import { RegisterDto, LoginDto, ChangePasswordDto, UserProfileResponse, AuthResponse } from "./dto/auth.dto"; 
 import { RegisterService } from "./services/register.service";
 import { LoginService } from "./services/login.service";
-import { LogoutService } from "./services/logout.service";
 import { AuthService } from "./services/auth.service";
 import { UserService } from "./services/user.service";
 import { ChangePasswordService } from "./services/change-password.service";
@@ -18,7 +17,6 @@ export class AuthController {
   constructor(
     private registerService: RegisterService,
     private loginService: LoginService,
-    private logoutService: LogoutService,
     private authService: AuthService,
     private userService: UserService,
     private changePasswordService: ChangePasswordService,
@@ -34,7 +32,7 @@ export class AuthController {
   @HttpCode(HttpStatus.OK)
   @UseGuards(RateLimitGuard)
   async login(
-    @Body() dto: LoginDto, 
+    @Body() dto: LoginDto,
     @Req() req: Request,
     @Res({ passthrough: true }) res: Response,
   ): Promise<AuthResponse> {
@@ -43,11 +41,22 @@ export class AuthController {
 
     const tokens = await this.loginService.execute(dto, ipAddress, userAgent);
 
+    // ═══════════════════════════════════════════════════════════════════════
+    // SECURE COOKIE CONFIG
+    // ═══════════════════════════════════════════════════════════════════════
+    // httpOnly: Prevents JavaScript access (XSS protection)
+    // secure: Only sent over HTTPS in production
+    // sameSite: 'Strict' prevents CSRF attacks
+    //   - 'Strict': Cookie not sent even in cross-site navigation
+    //   - 'Lax': Sent only for top-level navigation (safer, SPA friendly)
+    // maxAge: 7 days = 604,800,000 ms
     res.cookie('refresh_token', tokens.refresh_token, {
-      httpOnly: true,
-      secure: true,
-      sameSite: 'lax',
-      maxAge: 7 * 24 * 60 * 60 * 1000,
+      httpOnly: true, // Prevent XSS access
+      secure: process.env.NODE_ENV === 'production', // HTTPS only in prod
+      sameSite: 'strict', // CSRF protection (or 'lax' for SPA)
+      maxAge: 7 * 24 * 60 * 60 * 1000, // 7 days
+      path: '/', // Available site-wide
+      domain: process.env.COOKIE_DOMAIN, // Optional: specify domain
     });
 
     return { access_token: tokens.access_token };
@@ -56,9 +65,30 @@ export class AuthController {
   @UseGuards(AtGuard)
   @Post('logout')
   @HttpCode(HttpStatus.OK)
-  async logout(@User('sub') userId: number, @Res({ passthrough: true }) res: Response) {
-    await this.logoutService.execute(userId);
-    res.clearCookie('refresh_token');
+  async logout(
+    @User() user: JwtPayload,
+    @Res({ passthrough: true }) res: Response,
+  ) {
+    // Calculate remaining expiry time (JWT typically expires in 15 minutes)
+    const expiresIn = 15 * 60; // 15 minutes
+
+    // Blacklist JWT + revoke all RT
+    // JTI must be provided for blacklisting
+    if (user.jti) {
+      await this.authService.logout(user.jti, user.sub, expiresIn);
+    } else {
+      // Fallback: just revoke RT
+      await this.authService.forceLogoutAllSessions(user.sub);
+    }
+
+    // Clear httpOnly cookie
+    res.clearCookie('refresh_token', {
+      httpOnly: true,
+      secure: process.env.NODE_ENV === 'production',
+      sameSite: 'strict',
+      path: '/',
+    });
+
     return { success: true };
   }
 
@@ -71,11 +101,13 @@ export class AuthController {
   ) {
     const tokens = await this.authService.refreshTokens(user.sub, user.refreshToken);
 
+    // Set new RT cookie with secure settings
     res.cookie('refresh_token', tokens.refresh_token, {
       httpOnly: true,
-      secure: true,
-      sameSite: 'lax',
-      maxAge: 7 * 24 * 60 * 60 * 1000,
+      secure: process.env.NODE_ENV === 'production',
+      sameSite: 'strict',
+      maxAge: 7 * 24 * 60 * 60 * 1000, // 7 days
+      path: '/',
     });
 
     return { access_token: tokens.access_token };

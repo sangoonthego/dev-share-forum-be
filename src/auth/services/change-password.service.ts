@@ -1,21 +1,24 @@
 import { Injectable, BadRequestException, UnauthorizedException } from '@nestjs/common';
 import { PrismaService } from 'src/prisma/prisma.service';
+import { RedisService } from 'src/redis/redis.service';
 import * as bcrypt from 'bcrypt';
 import { ChangePasswordDto } from '../dto/auth.dto';
 
 /**
- * ChangePasswordService - Xử lý đổi mật khẩu
+ * ChangePasswordService - Password Change with Token Revocation
  * 
  * Workflow:
  * 1. Verify current password
  * 2. Hash new password
- * 3. Update in DB
- * 4. Increment token_version (revoke all tokens)
- * 5. Revoke all refresh tokens
+ * 3. Update in DB + increment token_version
+ * 4. Revoke all refresh tokens in Redis
  */
 @Injectable()
 export class ChangePasswordService {
-  constructor(private prisma: PrismaService) {}
+  constructor(
+    private prisma: PrismaService,
+    private redisService: RedisService,
+  ) {}
 
   async execute(userId: number, dto: ChangePasswordDto): Promise<{ success: boolean }> {
     // 1. Validation
@@ -62,11 +65,8 @@ export class ChangePasswordService {
       },
     });
 
-    // 6. Revoke all refresh tokens
-    await this.prisma.refresh_tokens.updateMany({
-      where: { user_id: userId },
-      data: { is_revoked: true },
-    });
+    // 6. Revoke all refresh tokens in Redis
+    await this.redisService.revokeAllTokens(userId);
 
     return { success: true };
   }

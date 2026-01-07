@@ -38,8 +38,6 @@ export class RegisterService {
       newUser.token_version,
     );
 
-    await this.tokenService.updateRtHash(newUser.id, tokens.refresh_token);
-
     return tokens;
   }
 }

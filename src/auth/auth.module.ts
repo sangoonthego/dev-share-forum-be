@@ -5,7 +5,6 @@ import { AuthService } from './services/auth.service';
 import { TokenService } from './services/token.service';
 import { LoginService } from './services/login.service';
 import { RegisterService } from './services/register.service';
-import { LogoutService } from './services/logout.service';
 import { UserService } from './services/user.service';
 import { LoginAuditService } from './services/login-audit.service';
 import { ChangePasswordService } from './services/change-password.service';
@@ -20,7 +19,6 @@ import { RtStrategy } from './strategies/rt.strategy';
     TokenService,
     LoginService,
     RegisterService,
-    LogoutService,
     UserService,
     LoginAuditService,
     ChangePasswordService,

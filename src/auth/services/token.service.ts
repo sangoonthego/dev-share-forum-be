@@ -1,24 +1,46 @@
 import { Injectable } from "@nestjs/common";
 import { JwtService } from "@nestjs/jwt";
-import { PrismaService } from "src/prisma/prisma.service";
+import { RedisService } from "src/redis/redis.service";
 import * as bcrypt from 'bcrypt';
+import { v4 as uuidv4 } from 'uuid';
 import { JwtPayload, Tokens } from "../dto/auth.dto";
 
+/**
+ * TokenService - JWT & Refresh Token Management
+ * 
+ * Security features:
+ * - Generate unique JTI (JWT ID) for each access token
+ * - Store RT in Redis (fast, revocable)
+ * - Support token version for password change revocation
+ * 
+ * Architecture:
+ * - Access Token: 15 minutes, includes jti for blacklisting
+ * - Refresh Token: 7 days, stored hashed in Redis with key `rt:{userId}`
+ */
 @Injectable()
 export class TokenService {
   constructor(
-    private prisma: PrismaService,
     private jwtService: JwtService,
+    private redisService: RedisService,
   ) {}
 
   /**
-   * Generate Access Token + Refresh Token
+   * Generate Access Token + Refresh Token pair
+   * 
+   * Access Token:
+   * - Short-lived (15 minutes)
+   * - Contains JTI for blacklist checking
+   * - Used for API authorization
+   * 
+   * Refresh Token:
+   * - Long-lived (7 days)
+   * - Stored hashed in Redis
+   * - Used to get new AT/RT pair
    * 
    * @param userId - User ID
    * @param email - User email
-   * @param role - User role (ADMIN / USER)
-   * @param tokenVersion - Token version (for invalidation on password change)
-   * @returns { access_token, refresh_token }
+   * @param role - User role
+   * @param tokenVersion - For password change detection
    */
   async getTokens(
     userId: number,
@@ -26,50 +48,96 @@ export class TokenService {
     role: string,
     tokenVersion: number = 1,
   ): Promise<Tokens> {
-    const payload: JwtPayload = {
+    // Generate unique JTI for access token (for blacklisting)
+    const jti = uuidv4();
+    
+    // Calculate expiry times
+    const atExpiresIn = 15 * 60; // 15 minutes
+    const rtExpiresIn = 7 * 24 * 60 * 60; // 7 days
+
+    const atPayload: JwtPayload = {
       sub: userId,
       email,
       role,
-      version: tokenVersion, // Include version to detect password changes
+      version: tokenVersion,
+      jti, // Include JTI for blacklisting
     };
 
-    const [at, rt] = await Promise.all([
-      // Access Token: 15 minutes (short-lived)
-      this.jwtService.signAsync(payload, {
+    const rtPayload: JwtPayload = {
+      sub: userId,
+      email,
+      role,
+      version: tokenVersion,
+    };
+
+    const [accessToken, refreshToken] = await Promise.all([
+      // Access Token - 15 minutes
+      this.jwtService.signAsync(atPayload, {
         secret: process.env.JWT_AT_SECRET,
-        expiresIn: '15m',
+        expiresIn: `${atExpiresIn}s`,
       }),
-      // Refresh Token: 7 days (long-lived, but can be revoked)
-      this.jwtService.signAsync(payload, {
+      // Refresh Token - 7 days
+      this.jwtService.signAsync(rtPayload, {
         secret: process.env.JWT_RT_SECRET,
-        expiresIn: '7d',
+        expiresIn: `${rtExpiresIn}s`,
       }),
     ]);
 
-    return { access_token: at, refresh_token: rt };
+    // Hash and store RT in Redis (instead of PostgreSQL)
+    await this.storeRefreshTokenInRedis(userId, refreshToken, rtExpiresIn);
+
+    return {
+      access_token: accessToken,
+      refresh_token: refreshToken,
+    };
   }
 
   /**
-   * Update or create refresh token hash in database
-   * One user = one active session (for simplicity)
-   * If multi-device needed, modify to use session_id instead of user_id @unique
+   * Store refresh token in Redis (replaces PostgreSQL storage)
+   * 
+   * Design choice: One user = one active session
+   * For multi-device: Use `rt:{userId}:{deviceId}` key format
+   * 
+   * @param userId - User ID
+   * @param rt - Raw refresh token
+   * @param expiresIn - Seconds until expiry
    */
-  async updateRtHash(userId: number, rt: string) {
-    const salt = 10;
-    const hash = await bcrypt.hash(rt, salt);
+  private async storeRefreshTokenInRedis(
+    userId: number,
+    rt: string,
+    expiresIn: number,
+  ): Promise<void> {
+    // Hash RT with bcrypt before storing
+    const hash = await bcrypt.hash(rt, 10);
+    
+    // Store in Redis with TTL = token expiry
+    await this.redisService.storeRefreshToken(userId, hash, expiresIn);
+  }
 
-    await this.prisma.refresh_tokens.upsert({
-      where: { user_id: userId },
-      update: {
-        token: hash,
-        expires_at: new Date(Date.now() + 7 * 24 * 60 * 60 * 1000),
-        is_revoked: false,
-      },
-      create: {
-        user_id: userId,
-        token: hash,
-        expires_at: new Date(Date.now() + 7 * 24 * 60 * 60 * 1000),
-      },
-    });
+  /**
+   * Get and verify RT hash from Redis
+   * Returns the stored hash for comparison
+   */
+  async getRefreshTokenHashFromRedis(userId: number): Promise<string | null> {
+    return await this.redisService.getRefreshTokenHash(userId);
+  }
+
+  /**
+   * Verify RT validity
+   * Compares provided RT against stored hash in Redis
+   * 
+   * @param userId - User ID
+   * @param rt - Provided refresh token
+   * @returns true if valid, false if invalid
+   */
+  async verifyRefreshToken(userId: number, rt: string): Promise<boolean> {
+    const storedHash = await this.getRefreshTokenHashFromRedis(userId);
+    
+    if (!storedHash) {
+      return false; // No RT stored (already revoked or first login)
+    }
+
+    // Compare provided RT against stored hash
+    return await bcrypt.compare(rt, storedHash);
   }
 }

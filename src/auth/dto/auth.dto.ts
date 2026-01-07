@@ -6,6 +6,7 @@ export class JwtPayload {
     email: string;
     role: string;
     version: number; // revoke all of tokens when change pass
+    jti?: string; // JWT ID for blacklisting
 }
 
 export interface Tokens {
@@ -42,7 +43,7 @@ export class LoginDto {
     @IsString()
     @IsNotEmpty({ message: 'Password is required' })
     password: string;
-}
+};
 
 // 4. Change Password DTO
 export class ChangePasswordDto {
