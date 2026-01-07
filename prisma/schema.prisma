@@ -56,6 +56,9 @@ model posts {
   is_published     Boolean  @default(false)
   view_count       Int      @default(0)
   
+  // Soft delete support
+  deleted_at       DateTime?
+  
   // Hỗ trợ AI Search (Vector 768 dimensions - chuẩn của model embedding phổ biến)
   embedding        Unsupported("vector(768)")? 
 
@@ -68,6 +71,7 @@ model posts {
   comments    comments[]
   posts_tags  posts_tags[]
 
+  @@index([deleted_at]) // For efficient soft delete filtering
   @@map("posts")
 }
 
