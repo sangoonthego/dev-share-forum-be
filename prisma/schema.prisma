@@ -89,6 +89,9 @@ model comments {
   parent    comments? @relation("CommentReplies", fields: [parent_id], references: [id])
   replies   comments[] @relation("CommentReplies")
 
+  // Soft delete support
+  deleted_at DateTime?
+
   created_at DateTime @default(now())
   updated_at DateTime @updatedAt
 
