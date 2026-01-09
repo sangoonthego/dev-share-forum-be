@@ -3,9 +3,13 @@ import {
   BadRequestException,
   NotFoundException,
   ConflictException,
+  ForbiddenException,
+  InternalServerErrorException,
 } from '@nestjs/common';
 import { PrismaService } from 'src/prisma/prisma.service';
 import { RedisService } from 'src/redis/redis.service';
+import { CloudinaryService } from 'src/media/cloudinary.service';
+import { UserActivityService } from 'src/users/user-activity.service';
 import { CreatePostDto } from './dto/create-post.dto';
 import { UpdatePostDto } from './dto/update-post.dto';
 import { PostResponseDto, PaginatedPostsResponseDto } from './dto/post-response.dto';
@@ -33,6 +37,8 @@ export class PostsService {
   constructor(
     private prisma: PrismaService,
     private redis: RedisService,
+    private cloudinaryService: CloudinaryService,
+    private userActivityService: UserActivityService,
   ) {}
 
   /**
@@ -43,9 +49,15 @@ export class PostsService {
    * 2. Generate unique slug from title using nanoid for guaranteed uniqueness
    * 3. Generate mock embedding from content (for future pgvector use)
    * 4. Atomic transaction:
-   *    - Create post
+   *    - Create post (defaults to PUBLISHED, can be DRAFT)
    *    - For each tag: find or create, then connect
-   * 5. Invalidate list cache (posts change)
+   * 5. Log POST_CREATED activity
+   * 6. Invalidate list cache (posts change)
+   * 
+   * Draft Support:
+   * - When status=DRAFT, post is not cached in Redis
+   * - Drafts are filtered from public feeds
+   * - Only author can view their drafts
    * 
    * Transaction ensures:
    * - All tags created/connected atomically
@@ -75,13 +87,14 @@ export class PostsService {
 
     // 4. Atomic transaction: create post + handle tags
     const post = await this.prisma.$transaction(async (tx) => {
-      // Create post (without embedding for now)
+      // Create post with status support (DRAFT or PUBLISHED)
       const newPost = await tx.posts.create({
         data: {
           title: dto.title,
           slug,
           content_markdown: sanitizedContent,
           is_published: dto.is_published || false,
+          status: dto.status || 'PUBLISHED', // Default to PUBLISHED, can be DRAFT
           author_id: userId,
           // embedding: embedding, // TODO: Enable when Prisma pgvector support is ready
         },
@@ -112,6 +125,17 @@ export class PostsService {
 
       return newPost;
     });
+
+    // 5. Log activity only for published posts
+    if (post.status === 'PUBLISHED') {
+      await this.userActivityService.logActivity(
+        userId,
+        'POST_CREATED',
+        post.id,
+      ).catch((err) =>
+        console.error('Failed to log POST_CREATED activity:', err),
+      );
+    }
 
     // 5. Invalidate all posts list caches with pattern matching
     await this._invalidateListCaches();
@@ -215,6 +239,15 @@ export class PostsService {
     }
     await this._invalidateListCaches();
 
+    // Log activity for published posts
+    if (updatedPost.status === 'PUBLISHED') {
+      await this.userActivityService
+        .logActivity(userId, 'POST_UPDATED', updatedPost.id)
+        .catch((err) =>
+          console.error('Failed to log POST_UPDATED activity:', err),
+        );
+    }
+
     return this._formatPostResponse(updatedPost);
   }
 
@@ -229,13 +262,32 @@ export class PostsService {
    * 
    * Invalidates relevant caches
    */
-  async deletePost(postId: number): Promise<void> {
+  async deletePost(postId: number, userId?: number): Promise<void> {
     const post = await this.prisma.posts.findUnique({
       where: { id: postId },
+      include: { media_assets: true },
     });
 
     if (!post) {
       throw new NotFoundException('Post not found');
+    }
+
+    // Verify ownership if userId provided
+    if (userId && post.author_id !== userId) {
+      throw new ForbiddenException('Cannot delete other users posts');
+    }
+
+    // Delete media assets from Cloudinary
+    for (const media of post.media_assets) {
+      try {
+        await this.cloudinaryService.deleteImage(media.public_id);
+      } catch (error) {
+        console.error(
+          `Failed to delete media ${media.public_id} from Cloudinary:`,
+          error,
+        );
+        // Continue with other deletions even if one fails
+      }
     }
 
     // Soft delete: set deleted_at timestamp
@@ -245,6 +297,13 @@ export class PostsService {
         deleted_at: new Date(),
       },
     });
+
+    // Delete activity logs related to this post
+    await this.userActivityService
+      .deleteActivitiesByPost(postId)
+      .catch((err) =>
+        console.error('Failed to delete post activities:', err),
+      );
 
     // Clear caches
     await this.redis.del(`post:slug:${post.slug}`);
@@ -309,9 +368,16 @@ export class PostsService {
       throw new NotFoundException('Post not found');
     }
 
-    // 4. Cache for 1 hour (3600 seconds)
+    // 3b. Check if post is DRAFT - only author can view
+    if (post.status === 'DRAFT' && userRole !== 'ADMIN') {
+      throw new ForbiddenException('Cannot access draft posts');
+    }
+
+    // 4. Cache for 1 hour (3600 seconds) - but NOT drafts
     const formatted = this._formatPostResponse(post);
-    await this.redis.set(cacheKey, JSON.stringify(formatted), 3600);
+    if (post.status === 'PUBLISHED') {
+      await this.redis.set(cacheKey, JSON.stringify(formatted), 3600);
+    }
 
     // 5. Increment view count
     await this._incrementViewCount(slug);
@@ -347,11 +413,15 @@ export class PostsService {
       return JSON.parse(cached);
     }
 
-    // Build where clause - exclude soft-deleted for non-ADMIN
-    const whereClause: any = isPublished ? { is_published: true } : {};
-    if (userRole !== 'ADMIN') {
-      whereClause.deleted_at = null;
+    // Build where clause - exclude soft-deleted for non-ADMIN, exclude DRAFT posts
+    const whereClause: any = {
+      deleted_at: null, // Always exclude soft-deleted
+      status: 'PUBLISHED', // Only published posts in public feed
+    };
+    if (isPublished) {
+      whereClause.is_published = true;
     }
+    // Note: ADMIN users can still see DRAFT via dedicated endpoint
 
     // Query database
     const [posts, total] = await Promise.all([

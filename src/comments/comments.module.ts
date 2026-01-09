@@ -3,6 +3,7 @@ import { CommentsController } from './comments.controller';
 import { CommentsService } from './comments.service';
 import { CommentOwnershipGuard } from './guards/comment-ownership.guard';
 import { NotificationsModule } from 'src/notifications/notifications.module';
+import { UsersModule } from 'src/users/users.module';
 
 /**
  * CommentsModule - Nested comment management for forum posts
@@ -32,7 +33,7 @@ import { NotificationsModule } from 'src/notifications/notifications.module';
  * - Auth module → CommentsService (hideAllCommentsByUser on ban)
  */
 @Module({
-  imports: [NotificationsModule],
+  imports: [NotificationsModule, UsersModule],
   controllers: [CommentsController],
   providers: [CommentsService, CommentOwnershipGuard],
   exports: [CommentsService, CommentOwnershipGuard],
