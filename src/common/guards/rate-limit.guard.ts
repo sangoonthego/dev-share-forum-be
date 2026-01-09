@@ -12,7 +12,7 @@ export class RateLimitGuard implements CanActivate {
 
   // Config
   private readonly MAX_ATTEMPTS = 5;
-  private readonly WINDOW_MS = 15 * 60 * 1000; // 15 minutes
+  private readonly WINDOW_MS = 2 * 60 * 1000; // 15 minutes
 
   canActivate(context: ExecutionContext): boolean {
     const request = context.switchToHttp().getRequest<Request>();
