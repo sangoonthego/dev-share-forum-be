@@ -13,6 +13,18 @@ enum UserRole {
   USER
 }
 
+enum PostStatus {
+  DRAFT
+  PUBLISHED
+  ARCHIVED
+}
+
+enum UserActivityType {
+  POST_CREATED
+  POST_UPDATED
+  COMMENT_CREATED
+}
+
 model refresh_tokens {
   id         Int      @id @default(autoincrement())
   token      String   @unique // Hashed token
@@ -46,6 +58,8 @@ model users {
   refresh_tokens refresh_tokens[]
   login_audits  login_audits[]
   notifications notifications[]
+  media_assets  media_assets[]
+  user_activities user_activities[]
 
   @@map("users")
 }
@@ -56,6 +70,7 @@ model posts {
   slug             String   @unique
   content_markdown String
   is_published     Boolean  @default(false)
+  status           PostStatus @default(PUBLISHED) // DRAFT, PUBLISHED, ARCHIVED
   view_count       Int      @default(0)
   
   // Soft delete support
@@ -70,10 +85,13 @@ model posts {
   created_at DateTime @default(now())
   updated_at DateTime @updatedAt
 
-  comments    comments[]
-  posts_tags  posts_tags[]
+  comments      comments[]
+  posts_tags    posts_tags[]
+  media_assets  media_assets[]
 
   @@index([deleted_at]) // For efficient soft delete filtering
+  @@index([status]) // For filtering drafts
+  @@index([author_id, status]) // For user's draft/published posts
   @@map("posts")
 }
 
@@ -189,4 +207,78 @@ model notifications {
   @@index([is_read])
   @@index([created_at])
   @@map("notifications")
+}
+
+/**
+ * Media Assets - Cloudinary integration for image storage
+ * 
+ * Strategy:
+ * - All images stored on Cloudinary, only metadata in DB
+ * - Linked to posts for post-specific media
+ * - Public ID used for Cloudinary deletion operations
+ * - Owner can only manage their own media
+ */
+model media_assets {
+  id        Int       @id @default(autoincrement())
+  
+  // Cloudinary metadata
+  cloudinary_url    String   // Full Cloudinary URL
+  public_id         String   @unique // Cloudinary public ID for deletion
+  file_name         String
+  file_size         Int? // File size in bytes
+  mime_type         String? // e.g., image/jpeg
+  
+  // Ownership and relations
+  user_id   Int
+  user      users     @relation(fields: [user_id], references: [id], onDelete: Cascade)
+  
+  // Optional link to post
+  post_id   Int?
+  post      posts?    @relation(fields: [post_id], references: [id], onDelete: SetNull)
+  
+  // Metadata
+  alt_text  String?
+  metadata  Json?     @default("{}")
+  
+  created_at DateTime @default(now())
+  updated_at DateTime @updatedAt
+
+  @@index([user_id]) // For fetching user's media
+  @@index([post_id]) // For fetching post's media
+  @@index([created_at]) // For sorting
+  @@map("media_assets")
+}
+
+/**
+ * User Activities - Contribution tracking (GitHub-style chart)
+ * 
+ * Strategy:
+ * - Log every user action: POST_CREATED, POST_UPDATED, COMMENT_CREATED
+ * - Index on (user_id, created_at) for efficient 365-day queries
+ * - When fetching profile, group activities by day for the past 365 days
+ * - Returns array: [{ date: "YYYY-MM-DD", count: number }]
+ * 
+ * Performance Note:
+ * - MUST have composite index on (user_id, created_at) to handle millions of rows
+ * - This index enables efficient range scans for 365-day queries
+ */
+model user_activities {
+  id        Int              @id @default(autoincrement())
+  
+  user_id   Int
+  user      users            @relation(fields: [user_id], references: [id], onDelete: Cascade)
+  
+  // Activity type
+  activity_type UserActivityType
+  
+  // Reference to related entity
+  post_id   Int?
+  comment_id Int?
+  
+  created_at DateTime @default(now())
+
+  // Performance critical: composite index for 365-day queries
+  @@index([user_id, created_at]) // Primary index for profile queries
+  @@index([created_at]) // For general activity timeline
+  @@map("user_activities")
 }
