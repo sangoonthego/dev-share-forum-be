@@ -1,5 +1,6 @@
-import { IsString, IsBoolean, IsArray, IsOptional, MinLength, MaxLength } from 'class-validator';
+import { IsString, IsBoolean, IsArray, IsOptional, MinLength, MaxLength, IsEnum } from 'class-validator';
 import { Transform } from 'class-transformer';
+import { PostStatus } from '@prisma/client';
 
 export class CreatePostDto {
   @IsString({ message: 'Title must be a string' })
@@ -17,6 +18,10 @@ export class CreatePostDto {
   @IsBoolean({ message: 'is_published must be a boolean' })
   @IsOptional()
   is_published?: boolean = false;
+
+  @IsEnum(PostStatus, { message: 'Status must be DRAFT, PUBLISHED, or ARCHIVED' })
+  @IsOptional()
+  status?: PostStatus = 'PUBLISHED';
 
   @IsArray({ message: 'Tags must be an array' })
   @IsString({ each: true, message: 'Each tag must be a string' })
