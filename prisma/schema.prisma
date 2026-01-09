@@ -36,14 +36,16 @@ model users {
   profile_avatar String?  // Avatar URL/path
   karma         Int       @default(0)
   token_version Int       @default(1) // For password change revocation
+  is_banned     Boolean   @default(false) // Account ban status for anti-abuse
   meta          Json?     @default("{}")
   created_at    DateTime  @default(now())
   updated_at    DateTime  @updatedAt
 
-  posts    posts[]
-  comments comments[]
+  posts         posts[]
+  comments      comments[]
   refresh_tokens refresh_tokens[]
-  login_audits login_audits[]
+  login_audits  login_audits[]
+  notifications notifications[]
 
   @@map("users")
 }
@@ -89,12 +91,21 @@ model comments {
   parent    comments? @relation("CommentReplies", fields: [parent_id], references: [id])
   replies   comments[] @relation("CommentReplies")
 
+  // Anti-abuse: Max depth limit (5 levels) - comments at depth 5 remain at 5
+  // Example: depth 0 = root, depth 1 = replies to root, depth 5 = max level
+  depth     Int       @default(0)
+
+  // Atomic reaction counters for high concurrency (use increment/decrement)
+  likes     Int       @default(0)
+  dislikes  Int       @default(0)
+
   // Soft delete support
   deleted_at DateTime?
 
   created_at DateTime @default(now())
   updated_at DateTime @updatedAt
 
+  @@index([depth]) // For lazy loading: fetch root comments first
   @@map("comments")
 }
 
@@ -137,4 +148,45 @@ model login_audits {
   @@index([user_id])
   @@index([created_at])
   @@map("login_audits")
+}
+
+/**
+ * Notifications Model - Real-time notification persistence
+ * 
+ * Storage Strategy:
+ * - Persistent: Saved in PostgreSQL for reliability
+ * - Delivery: WebSockets push to online users instantly
+ * - History: Users can view unread notifications via API
+ * 
+ * Triggers:
+ * - User replies to comment → Notify parent comment author
+ * - User comments on post → Notify post author
+ * 
+ * Lifecycle:
+ * - isRead: false on creation, updated when user views
+ * - Archive: Notifications older than 30 days can be archived
+ */
+model notifications {
+  id        Int     @id @default(autoincrement())
+  user_id   Int
+  user      users   @relation(fields: [user_id], references: [id], onDelete: Cascade)
+  
+  // Notification content
+  title     String  // "New reply to your comment" or "New comment on your post"
+  message   String  // Detailed message with user names
+  type      String  // "comment_reply" | "post_comment" | "system"
+  
+  // Related entity links for deep linking
+  related_comment_id Int?
+  related_post_id    Int?
+  related_user_id    Int? // User who triggered the notification
+  
+  // Status tracking
+  is_read   Boolean  @default(false)
+  created_at DateTime @default(now())
+
+  @@index([user_id])
+  @@index([is_read])
+  @@index([created_at])
+  @@map("notifications")
 }
