@@ -9,6 +9,7 @@ import { PrismaService } from 'src/prisma/prisma.service';
 import { RedisService } from 'src/redis/redis.service';
 import { NotificationsService } from 'src/notifications/notifications.service';
 import { NotificationsGateway } from 'src/notifications/notifications.gateway';
+import { UserActivityService } from 'src/users/user-activity.service';
 import { CreateCommentDto } from './dto/create-comment.dto';
 import { CommentResponseDto, PaginatedCommentsResponseDto } from './dto/comment-response.dto';
 import DOMPurify from 'isomorphic-dompurify';
@@ -55,6 +56,7 @@ export class CommentsService {
     private redis: RedisService,
     private notificationsService: NotificationsService,
     private notificationsGateway: NotificationsGateway,
+    private userActivityService: UserActivityService,
   ) {}
 
   /**
@@ -169,6 +171,13 @@ export class CommentsService {
       parentAuthorId,
       userId,
     );
+
+    // 5b. Log activity for contribution tracking
+    await this.userActivityService
+      .logActivity(userId, 'COMMENT_CREATED', dto.postId, comment.id)
+      .catch((err) =>
+        console.error('Failed to log COMMENT_CREATED activity:', err),
+      );
 
     // 6. Invalidate comment tree cache
     await this._invalidateCommentCache(dto.postId);
