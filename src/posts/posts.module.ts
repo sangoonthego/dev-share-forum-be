@@ -2,6 +2,8 @@ import { Module } from '@nestjs/common';
 import { PostsController } from './posts.controller';
 import { PostsService } from './posts.service';
 import { OwnershipGuard } from './guards/ownership.guard';
+import { MediaModule } from '../media/media.module';
+import { UsersModule } from '../users/users.module';
 
 /**
  * PostsModule - Forum Post Management
@@ -29,6 +31,7 @@ import { OwnershipGuard } from './guards/ownership.guard';
  * - AI embedding placeholder
  */
 @Module({
+  imports: [MediaModule, UsersModule],
   controllers: [PostsController],
   providers: [PostsService, OwnershipGuard],
   exports: [PostsService],
