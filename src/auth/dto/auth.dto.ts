@@ -1,4 +1,4 @@
-import { IsEmail, IsNotEmpty, IsString, MinLength, IsOptional } from 'class-validator';
+import { IsEmail, IsNotEmpty, IsString, MinLength, IsOptional, Matches } from 'class-validator';
 
 // 1. JWT & Token Interfaces
 export class JwtPayload {
@@ -18,10 +18,16 @@ export interface Tokens {
 export class RegisterDto {
     @IsEmail({}, { message: 'Invalid email format' })
     @IsNotEmpty({ message: 'Email is required' })
+    @Matches(/^[^@]{5,}@/, {
+        message: "Email must have at least 5 characterist before @!!!"
+    })
     email: string;
 
     @IsString()
     @IsNotEmpty({ message: 'Password is required' })
+    @Matches(/[A-Z]/, {
+        message: "Password must be at least an Uppercase"
+    })
     @MinLength(6, { message: 'Password must be at least 6 characters' })
     password: string;
 

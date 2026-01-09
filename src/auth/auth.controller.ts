@@ -11,6 +11,7 @@ import { RtGuard } from "src/common/guards/rt.guard";
 import { RateLimitGuard } from "src/common/guards/rate-limit.guard";
 import { User } from "src/common/decorators/user.decorator";
 import type { JwtPayload } from "./dto/auth.dto";
+import { Public } from 'src/common/decorators/public.decorator';
 
 @Controller('auth')
 export class AuthController {
@@ -23,12 +24,14 @@ export class AuthController {
   ) {}
 
   @Post('register')
+  @Public()
   @HttpCode(HttpStatus.CREATED)
   async register(@Body() dto: RegisterDto) {
     return this.registerService.execute(dto);
   }
 
   @Post('login')
+  @Public()
   @HttpCode(HttpStatus.OK)
   @UseGuards(RateLimitGuard)
   async login(
