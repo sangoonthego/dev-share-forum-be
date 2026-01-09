@@ -7,8 +7,6 @@ import {
 } from '@nestjs/common';
 import { PrismaService } from 'src/prisma/prisma.service';
 import { RedisService } from 'src/redis/redis.service';
-import { NotificationsService } from 'src/notifications/notifications.service';
-import { NotificationsGateway } from 'src/notifications/notifications.gateway';
 import { CreateCommentDto } from './dto/create-comment.dto';
 import { CommentResponseDto, PaginatedCommentsResponseDto } from './dto/comment-response.dto';
 import DOMPurify from 'isomorphic-dompurify';
@@ -22,27 +20,38 @@ import { CommentTreeUtility } from './utils/comment-tree.utility';
  * 1. **Max Depth Limit (5 Levels)**
  *    - Prevents infinite nesting that degrades UX and performance
  *    - Comments at depth 4 are "final level" - replies stay at depth 5
+ *    - Example tree:
+ *      - Depth 0: "I like this post"
+ *      - Depth 1: "Me too!"
+ *      - Depth 2: "Indeed"
+ *      - Depth 3: "Agreed"
+ *      - Depth 4: "Yes"
+ *      - Depth 5: All replies to depth 4 also become depth 5 (siblings)
  *
  * 2. **Atomic Reaction Counters**
  *    - Uses Prisma `increment` for thread-safe like/dislike operations
  *    - No race conditions even with concurrent requests
+ *    - Consistent counts across distributed systems
  *
  * 3. **Lazy Loading for Deep Branches**
  *    - Initially fetch only root comments (depth 0)
  *    - User requests expand → fetch replies on-demand
+ *    - Reduces initial payload, improves performance
  *
  * 4. **User Ban Handling**
  *    - When user is banned: all their comments marked `deleted_at` timestamp
  *    - UI shows "User banned" placeholder instead of content
+ *    - Data preserved for audit trail
  *
- * 5. **Real-time Notifications**
- *    - Integrated with NotificationsService for persistence
- *    - Integrated with NotificationsGateway for WebSocket push
- *
- * **Caching Strategy:**
- * - Cache Keys: comments:post:{postId}:full, comments:post:{postId}:root
+ * **CACHING STRATEGY:**
+ * - Cache Key: comments:post:{postId}
  * - Invalidated on: create, update, delete, ban
  * - TTL: 1 hour (configurable)
+ *
+ * **SOFT DELETE:**
+ * - Comments marked with deleted_at timestamp
+ * - Children preserved, maintains thread structure
+ * - Prevents data loss while allowing moderation
  */
 @Injectable()
 export class CommentsService {
@@ -53,8 +62,6 @@ export class CommentsService {
   constructor(
     private prisma: PrismaService,
     private redis: RedisService,
-    private notificationsService: NotificationsService,
-    private notificationsGateway: NotificationsGateway,
   ) {}
 
   /**
@@ -66,9 +73,8 @@ export class CommentsService {
    * 3. If parentId: validate parent exists, calculate child depth
    * 4. Check max depth limit (cap at 5)
    * 5. Create comment with calculated depth atomically
-   * 6. Trigger notifications
-   * 7. Invalidate cache
-   * 8. Return comment
+   * 6. Invalidate cache
+   * 7. Return comment (notification triggered by caller)
    *
    * **Depth Calculation Example:**
    * ```
@@ -76,10 +82,6 @@ export class CommentsService {
    * Parent depth 4 → Child depth 5
    * Parent depth 5 → Child depth 5 (capped)
    * ```
-   *
-   * **Notifications:**
-   * - Reply to comment → Notify parent comment author
-   * - Comment on post → Notify post author
    *
    * @param userId - Author user ID
    * @param dto - CreateCommentDto
@@ -97,7 +99,7 @@ export class CommentsService {
     // 2. Validate post exists and not soft-deleted
     const post = await this.prisma.posts.findUnique({
       where: { id: dto.postId },
-      select: { id: true, author_id: true },
+      select: { id: true },
     });
 
     if (!post) {
@@ -106,17 +108,11 @@ export class CommentsService {
 
     // 3. Calculate depth and validate max depth
     let commentDepth = 0;
-    let parentAuthorId: number | null = null;
 
     if (dto.parentId) {
       const parentComment = await this.prisma.comments.findUnique({
         where: { id: dto.parentId },
-        select: {
-          id: true,
-          post_id: true,
-          depth: true,
-          author_id: true,
-        },
+        select: { id: true, post_id: true, depth: true },
       });
 
       if (!parentComment) {
@@ -136,8 +132,6 @@ export class CommentsService {
         parentComment.depth + 1,
         this.MAX_COMMENT_DEPTH,
       );
-
-      parentAuthorId = parentComment.author_id;
     }
 
     // 4. Create comment atomically with calculated depth
@@ -162,15 +156,7 @@ export class CommentsService {
       },
     });
 
-    // 5. Trigger notifications
-    await this._triggerCommentNotifications(
-      comment,
-      post,
-      parentAuthorId,
-      userId,
-    );
-
-    // 6. Invalidate comment tree cache
+    // 5. Invalidate comment tree cache
     await this._invalidateCommentCache(dto.postId);
 
     return this._formatComment(comment);
@@ -633,113 +619,5 @@ export class CommentsService {
   private async _invalidateCommentCache(postId: number): Promise<void> {
     await this.redis.del(`comments:post:${postId}:full`);
     await this.redis.del(`comments:post:${postId}:root`);
-  }
-
-  /**
-   * **INTERNAL: Trigger notifications for new comments**
-   *
-   * Sends notifications to:
-   * 1. Post author (if comment on post)
-   * 2. Parent comment author (if reply to comment)
-   *
-   * **Notification Flow:**
-   * - Save to PostgreSQL via NotificationsService
-   * - Push to online user via NotificationsGateway
-   * - Offline users get notifications on next login
-   *
-   * **Null Safety:**
-   * - Validates comment.author exists before accessing full_name
-   * - Converts undefined values to null for DTO compatibility
-   * - Auto-adds timestamp in gateway
-   *
-   * @param comment - Created comment
-   * @param post - Post info (contains author_id)
-   * @param parentAuthorId - Parent comment author (if reply)
-   * @param userId - Commenter user ID
-   */
-  private async _triggerCommentNotifications(
-    comment: any,
-    post: any,
-    parentAuthorId: number | null,
-    userId: number,
-  ): Promise<void> {
-    try {
-      // Strict null-check: ensure comment.author exists before accessing properties
-      if (!comment || !comment.author) {
-        this.logger.warn(
-          `[NOTIFICATION] Skipping: comment or author is undefined`,
-        );
-        return;
-      }
-
-      const commenterName = comment.author.full_name || 'Someone';
-
-      // Notify post author if different from commenter
-      if (post.author_id !== userId) {
-        const postNotif =
-          await this.notificationsService.createNotification({
-            user_id: post.author_id,
-            title: 'New comment on your post',
-            message: `${commenterName} commented on your post`,
-            type: 'post_comment',
-            related_post_id: post.id,
-            related_comment_id: comment.id,
-            related_user_id: userId,
-          });
-
-        // Ensure null-safety: convert undefined to null
-        await this.notificationsGateway.notifyUser(post.author_id, {
-          id: postNotif.id,
-          title: postNotif.title,
-          message: postNotif.message,
-          type: postNotif.type,
-          relatedPostId: postNotif.relatedPostId ?? null,
-          relatedCommentId: postNotif.relatedCommentId ?? null,
-          relatedUserId: postNotif.relatedUserId ?? null,
-          createdAt: postNotif.createdAt,
-          timestamp: Date.now(),
-        });
-
-        this.logger.debug(
-          `[NOTIFICATION] Post author ${post.author_id} notified of new comment`,
-        );
-      }
-
-      // Notify parent comment author if reply
-      if (parentAuthorId && parentAuthorId !== userId) {
-        const replyNotif =
-          await this.notificationsService.createNotification({
-            user_id: parentAuthorId,
-            title: 'New reply to your comment',
-            message: `${commenterName} replied to your comment`,
-            type: 'comment_reply',
-            related_post_id: post.id,
-            related_comment_id: comment.id,
-            related_user_id: userId,
-          });
-
-        // Ensure null-safety: convert undefined to null
-        await this.notificationsGateway.notifyUser(parentAuthorId, {
-          id: replyNotif.id,
-          title: replyNotif.title,
-          message: replyNotif.message,
-          type: replyNotif.type,
-          relatedPostId: replyNotif.relatedPostId ?? null,
-          relatedCommentId: replyNotif.relatedCommentId ?? null,
-          relatedUserId: replyNotif.relatedUserId ?? null,
-          createdAt: replyNotif.createdAt,
-          timestamp: Date.now(),
-        });
-
-        this.logger.debug(
-          `[NOTIFICATION] Comment author ${parentAuthorId} notified of reply`,
-        );
-      }
-    } catch (error) {
-      // Don't fail comment creation if notifications fail
-      this.logger.warn(
-        `[NOTIFICATION ERROR] Failed to trigger notifications: ${error.message}`,
-      );
-    }
   }
 }
