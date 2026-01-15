@@ -1,7 +1,9 @@
 import { IsString, IsBoolean, IsArray, IsOptional, MinLength, MaxLength } from 'class-validator';
 import { Transform } from 'class-transformer';
+import { PartialType } from '@nestjs/mapped-types';
+import { CreatePostDto } from './create-post.dto';
 
-export class UpdatePostDto {
+export class UpdatePostDto extends PartialType(CreatePostDto) {
   @IsString({ message: 'Title must be a string' })
   @MinLength(3, { message: 'Title must be at least 3 characters' })
   @MaxLength(200, { message: 'Title must not exceed 200 characters' })
