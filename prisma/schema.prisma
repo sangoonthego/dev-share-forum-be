@@ -76,7 +76,7 @@ model posts {
   // Soft delete support
   deleted_at       DateTime?
   
-  // Hỗ trợ AI Search (Vector 768 dimensions - chuẩn của model embedding phổ biến)
+  // Hỗ trợ AI Search (Vector 768 dimensions - chuẩn của model Gemini text-embedding-004)
   embedding        Unsupported("vector(768)")? 
 
   author_id Int
