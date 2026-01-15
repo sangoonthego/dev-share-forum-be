@@ -1,0 +1,54 @@
+# Git
+.git
+.gitignore
+
+# Node modules (will be reinstalled)
+node_modules
+pnpm-store
+
+# Build outputs (will be rebuilt)
+dist
+build
+coverage
+
+# Environment files (use Railway/platform secrets instead)
+.env
+.env.local
+.env.*.local
+
+# Development files
+.vscode
+.idea
+*.swp
+*.swo
+*~
+.DS_Store
+
+# Test files (excluded from production image)
+test
+*.spec.ts
+jest-e2e.json
+jest.config.js
+
+# CI/CD
+.github
+.gitlab-ci.yml
+.circleci
+
+# Documentation (optional)
+README.md
+docs
+guides
+
+# Misc
+.prettierignore
+.eslintignore
+tsconfig.build.json
+
+# Temporary files
+*.tmp
+*.log
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+pnpm-debug.log*
