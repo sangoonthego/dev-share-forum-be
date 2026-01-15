@@ -84,12 +84,12 @@ async function bootstrap() {
   await app.listen(port);
 
   logger.log(`━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━`);
-  logger.log(`🚀 DevShare Lite API`);
-  logger.log(`📍 http://localhost:${port}`);
-  logger.log(`📦 Security: Enabled (CORS, CSRF, Headers)`);
-  logger.log(`🔐 Auth: JWT + Redis Blacklist + Global AtGuard`);
-  logger.log(`💾 Storage: Redis (RT) + PostgreSQL (User Data)`);
-  logger.log(`📝 Posts: Atomic Creation, Caching, Ownership Verification`);
+  logger.log(`DevShare Lite API`);
+  logger.log(`http://localhost:${port}`);
+  logger.log(`Security: Enabled (CORS, CSRF, Headers)`);
+  logger.log(`Auth: JWT + Redis Blacklist + Global AtGuard`);
+  logger.log(`Storage: Redis (RT) + PostgreSQL (User Data)`);
+  logger.log(`Posts: Atomic Creation, Caching, Ownership Verification`);
   logger.log(`━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━`);
 }
 

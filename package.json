@@ -20,10 +20,12 @@
     "test:e2e": "jest --config ./test/jest-e2e.json"
   },
   "dependencies": {
+    "@google/generative-ai": "^0.24.1",
     "@liaoliaots/nestjs-redis": "^10.0.0",
     "@nestjs/common": "^11.0.1",
     "@nestjs/core": "^11.0.1",
     "@nestjs/jwt": "^11.0.2",
+    "@nestjs/mapped-types": "^2.1.0",
     "@nestjs/passport": "^11.0.5",
     "@nestjs/platform-express": "^11.0.1",
     "@nestjs/platform-socket.io": "^11.1.11",
@@ -41,6 +43,7 @@
     "ioredis": "^5.9.0",
     "isomorphic-dompurify": "^2.35.0",
     "nanoid": "^5.1.6",
+    "openai": "^6.16.0",
     "passport": "^0.7.0",
     "passport-jwt": "^4.0.1",
     "pg": "^8.16.3",
