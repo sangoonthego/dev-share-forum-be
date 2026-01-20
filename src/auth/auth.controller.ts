@@ -1,6 +1,6 @@
 import { Controller, Post, Body, HttpCode, HttpStatus, UseGuards, Res, Get, Req } from "@nestjs/common";
 import type { Response, Request } from "express";
-import { RegisterDto, LoginDto, ChangePasswordDto, UserProfileResponse, AuthResponse } from "./dto/auth.dto"; 
+import { RegisterDto, LoginDto, ChangePasswordDto, UserProfileResponse, AuthResponse, OAuthUserResponse } from "./dto/auth.dto"; 
 import { RegisterService } from "./services/register.service";
 import { LoginService } from "./services/login.service";
 import { AuthService } from "./services/auth.service";
@@ -8,6 +8,8 @@ import { UserService } from "./services/user.service";
 import { ChangePasswordService } from "./services/change-password.service";
 import { AtGuard } from "src/common/guards/at.guard";
 import { RtGuard } from "src/common/guards/rt.guard";
+import { GoogleAuthGuard } from "src/common/guards/google-auth.guard";
+import { GitHubAuthGuard } from "src/common/guards/github-auth.guard";
 import { RateLimitGuard } from "src/common/guards/rate-limit.guard";
 import { User } from "src/common/decorators/user.decorator";
 import type { JwtPayload } from "./dto/auth.dto";
@@ -132,6 +134,159 @@ export class AuthController {
   ) {
     return this.changePasswordService.execute(userId, dto);
   }
+
+  /**
+   * GET /auth/google - Initiate Google OAuth2 flow
+   * 
+   * Public endpoint - redirects to Google consent screen
+   * Query params:
+   * - redirect_uri: Optional. Frontend URL to redirect after callback
+   *   (Used to return user to original page after OAuth)
+   */
+  @Get('google')
+  @Public()
+  @UseGuards(GoogleAuthGuard)
+  async googleAuth(
+    @Req() req: Request,
+  ) {
+    // Passport GoogleAuthGuard will automatically redirect to Google
+    // This method exists for route registration only
+  }
+
+  /**
+   * GET /auth/google/callback - Google OAuth2 callback
+   * 
+   * Called by Google after user authorizes.
+   * Flow:
+   * 1. Google redirects with authorization code
+   * 2. Passport exchanges code for tokens
+   * 3. GoogleStrategy.validate() is called with user profile
+   * 4. AuthService.validateOAuthUser() handles account linking
+   * 5. User object (with tokens) is available in req.user
+   * 6. Set httpOnly cookie with refresh token
+   * 7. Redirect to frontend with access token in URL or session
+   * 
+   * Frontend should:
+   * - Extract access_token from URL or response
+   * - Store in memory (not localStorage - XSS safer)
+   * - Use Authorization: Bearer <token> for API calls
+   * - Refresh Token is auto-sent in httpOnly cookie
+   */
+  @Get('google/callback')
+  @Public()
+  @UseGuards(GoogleAuthGuard)
+  async googleCallback(
+    @Req() req: Request,
+    @Res() res: Response,
+  ) {
+    const user = req.user as OAuthUserResponse | undefined;
+
+    if (!user) {
+      return res.redirect(
+        `${process.env.FRONTEND_URL}/auth/login?error=oauth_failed`,
+      );
+    }
+
+    // Set httpOnly cookie with Refresh Token
+    res.cookie('refresh_token', user.refresh_token, {
+      httpOnly: true,
+      secure: process.env.NODE_ENV === 'production',
+      sameSite: 'lax', // Lax for cross-site OAuth callback
+      maxAge: 7 * 24 * 60 * 60 * 1000, // 7 days
+      path: '/',
+      domain: process.env.COOKIE_DOMAIN,
+    });
+
+    // Redirect to frontend with access token
+    // Frontend will extract token from URL and store in memory
+    const redirectUrl = new URL(
+      `${process.env.FRONTEND_URL}/auth/oauth-callback`,
+    );
+    redirectUrl.searchParams.append('access_token', user.access_token);
+    redirectUrl.searchParams.append('provider', 'google');
+    redirectUrl.searchParams.append('email', user.email);
+
+    return res.redirect(redirectUrl.toString());
+  }
+
+  /**
+   * GET /auth/github - Initiate GitHub OAuth2 flow
+   * 
+   * Public endpoint - redirects to GitHub authorization screen
+   * Query params:
+   * - redirect_uri: Optional. Frontend URL to redirect after callback
+   */
+  @Get('github')
+  @Public()
+  @UseGuards(GitHubAuthGuard)
+  async githubAuth(
+    @Req() req: Request,
+  ) {
+    // Passport GitHubAuthGuard will automatically redirect to GitHub
+    // This method exists for route registration only
+  }
+
+  /**
+   * GET /auth/github/callback - GitHub OAuth2 callback
+   * 
+   * Called by GitHub after user authorizes.
+   * Flow:
+   * 1. GitHub redirects with authorization code
+   * 2. Passport exchanges code for tokens
+   * 3. GitHubStrategy.validate() is called with user profile
+   * 4. AuthService.validateOAuthUser() handles account linking
+   * 5. User object (with tokens) is available in req.user
+   * 6. Set httpOnly cookie with refresh token
+   * 7. Redirect to frontend with access token in URL or session
+   * 
+   * Frontend should:
+   * - Extract access_token from URL or response
+   * - Store in memory (not localStorage - XSS safer)
+   * - Use Authorization: Bearer <token> for API calls
+   * - Refresh Token is auto-sent in httpOnly cookie
+   */
+  @Get('github/callback')
+  @Public()
+  @UseGuards(GitHubAuthGuard)
+  async githubCallback(
+    @Req() req: Request,
+    @Res() res: Response,
+  ) {
+    const user = req.user as OAuthUserResponse | undefined;
+
+    if (!user) {
+      return res.redirect(
+        `${process.env.FRONTEND_URL}/auth/login?error=oauth_failed`,
+      );
+    }
+
+    // Set httpOnly cookie with Refresh Token
+    res.cookie('refresh_token', user.refresh_token, {
+      httpOnly: true,
+      secure: process.env.NODE_ENV === 'production',
+      sameSite: 'lax', // Lax for cross-site OAuth callback
+      maxAge: 7 * 24 * 60 * 60 * 1000, // 7 days
+      path: '/',
+      domain: process.env.COOKIE_DOMAIN,
+    });
+
+    // Redirect to frontend with access token
+    // Frontend will extract token from URL and store in memory
+    const redirectUrl = new URL(
+      `${process.env.FRONTEND_URL}/auth/oauth-callback`,
+    );
+    redirectUrl.searchParams.append('access_token', user.access_token);
+    redirectUrl.searchParams.append('provider', 'github');
+    redirectUrl.searchParams.append('email', user.email);
+
+    return res.redirect(redirectUrl.toString());
+  }
+
+  /**
+   * ═══════════════════════════════════════════════════════════════════════
+   * END OF OAUTH2 ENDPOINTS
+   * ═══════════════════════════════════════════════════════════════════════
+   */
 
   /**
    * Extract client IP from request
