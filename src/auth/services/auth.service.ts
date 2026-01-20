@@ -46,9 +46,22 @@ export class AuthService {
    * @throws ForbiddenException if RT invalid or reuse detected
    */
   async refreshTokens(userId: number, rt: string): Promise<Tokens> {
-    // Get stored RT hash from Redis
+    // Decode RT to extract family
+    let decodedRt: any;
+    try {
+      decodedRt = this.jwtService.decode(rt) as { family?: string; sub?: number };
+    } catch (e) {
+      throw new ForbiddenException('Invalid refresh token format');
+    }
+
+    if (!decodedRt || !decodedRt.family) {
+      throw new ForbiddenException('Refresh token missing family identifier');
+    }
+
+    // Get stored RT hash from Redis using family
     const storedHash = await this.tokenService.getRefreshTokenHashFromRedis(
       userId,
+      decodedRt.family,
     );
 
     if (!storedHash) {
@@ -57,23 +70,31 @@ export class AuthService {
     }
 
     // Verify RT against stored hash
-    const rtValid = await this.tokenService.verifyRefreshToken(userId, rt);
+    const rtVerification = await this.tokenService.verifyRefreshToken(
+      userId,
+      rt,
+      decodedRt.family,
+    );
 
-    if (!rtValid) {
+    if (rtVerification.reuseDetected) {
       // SECURITY: Token reuse detected!
       // This suggests account compromise (token stolen)
       // Immediately revoke all tokens
-      await this.redisService.revokeAllTokens(userId);
+      await this.tokenService.revokeAllTokens(userId);
 
       throw new ForbiddenException(
         'Token reuse detected - all sessions revoked. Please login again.',
       );
     }
 
-    // RT is valid, generate new tokens
+    if (!rtVerification.valid) {
+      throw new ForbiddenException('Invalid refresh token');
+    }
+
+    // RT is valid, generate new tokens with rotation
     // NOTE: In real scenario, would fetch user to get token_version
     // For now, we trust the stored data
-    const tokens = await this.tokenService.getTokens(userId, '', '', 1);
+    const tokens = await this.tokenService.getTokens(userId, '', '', 1, decodedRt.family);
 
     return tokens;
   }
