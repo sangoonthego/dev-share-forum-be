@@ -727,22 +727,37 @@ export class PostsService {
   }
 
   /**
-   * SEMANTIC SEARCH: Search posts using vector embeddings
+   * SEMANTIC SEARCH: Search posts using vector embeddings with similarity threshold
    * 
    * Strategy:
    * 1. Check Redis cache for search results (cache hit = no API call)
    * 2. Generate embedding for query (via API or local model)
    * 3. Query database using pgvector cosine distance (<=> operator)
-   * 4. Filter out soft-deleted and draft posts
-   * 5. Apply OwnershipGuard logic (non-authors can't see drafts)
-   * 6. Cache results for 30 minutes to reduce API costs
-   * 7. Return top 5 most relevant posts
+   * 4. **FILTER OUT LOW-RELEVANCE RESULTS** (distance > threshold)
+   * 5. Filter out soft-deleted and draft posts
+   * 6. Apply OwnershipGuard logic (non-authors can't see drafts)
+   * 7. Cache results for 30 minutes to reduce API costs
+   * 8. Return top 5 most relevant posts
    * 
    * Vector Search Details:
    * - Uses HNSW index for O(log n) search performance
    * - <=> operator calculates cosine distance (0-2 range)
    * - Lower distance = higher relevance
-   * - Query size: 768 dimensions (OpenAI text-embedding-3-small standard)
+   * - Query size: 768 dimensions (Google Gemini standard)
+   * - **Similarity Threshold**: distance < 1.0 (filters out low-relevance results)
+   * 
+   * Similarity Threshold:
+   * - 0.0 = identical vectors (perfect match)
+   * - 0.3 = very similar (usually relevant)
+   * - 0.5 = moderately similar (sometimes relevant)
+   * - 1.0 = orthogonal (completely different)
+   * - 2.0 = opposite direction (negative correlation)
+   * 
+   * Default: 1.0 (slightly permissive, catches most relevant results)
+   * Can be tuned based on use case:
+   * - Strict: 0.5 (returns only highly relevant results)
+   * - Normal: 1.0 (balanced relevance)
+   * - Loose: 1.5 (catch more related but less relevant results)
    * 
    * Cost Optimization:
    * - Redis cache reduces API calls (embedding generation is expensive)
@@ -759,6 +774,7 @@ export class PostsService {
     userRole?: string,
     userId?: number,
     limit: number = 5,
+    similarityThreshold: number = 1.0, // Default: catches most relevant results
   ): Promise<PostResponseDto[]> {
     // Validate query
     if (!query || query.trim().length === 0) {
@@ -769,22 +785,28 @@ export class PostsService {
       throw new BadRequestException('Search query exceeds 500 characters');
     }
 
-    // 1. Check Redis cache first
-    const cacheKey = `search:${query.toLowerCase()}:role:${userRole || 'guest'}`;
+    // Validate similarity threshold (0.0 to 2.0 range for cosine distance)
+    if (similarityThreshold < 0 || similarityThreshold > 2.0) {
+      throw new BadRequestException('Similarity threshold must be between 0 and 2.0');
+    }
+
+    // 1. Check Redis cache first (includes threshold in key for multi-level caching)
+    const cacheKey = `search:${query.toLowerCase()}:threshold:${similarityThreshold}:role:${userRole || 'guest'}`;
     const cached = await this.redis.get(cacheKey);
     if (cached) {
-      console.log(`[SEARCH] Cache hit for query: "${query}"`);
+      this.logger.debug(`[SEARCH] Cache hit for query: "${query}"`, 'POSTS');
       return JSON.parse(cached);
     }
 
     // 2. Generate embedding for the query
     const queryEmbedding = await this.generateEmbedding(query);
 
-    // 3. Execute vector search using pgvector cosine distance
-    // SQL: SELECT * FROM posts ORDER BY embedding <=> $1::vector LIMIT $2
-    // FIX: Using $queryRawUnsafe with explicit parameter indexing to avoid parameter mapping issues
-    // - $1: Vector array formatted as string literal '[0.1,0.2,...]'
-    // - $2: Integer limit value
+    // 3. Execute vector search using pgvector cosine distance with threshold filter
+    // SQL Query optimizations:
+    // - HNSW index for efficient approximate nearest neighbor search
+    // - WHERE distance_value < threshold to filter low-relevance results
+    // - ORDER BY distance to rank by relevance
+    // - LIMIT applied after filtering to ensure top results
     const embeddingString = JSON.stringify(queryEmbedding);
     const limitInt = Math.max(1, Math.min(limit, 100)); // Clamp between 1-100 for safety
     
@@ -806,8 +828,9 @@ export class PostsService {
       WHERE 
         p.deleted_at IS NULL
         AND p.status = 'PUBLISHED'
+        AND (p.embedding <=> $1::vector) < $3::float -- SIMILARITY THRESHOLD FILTER
       ORDER BY 
-        p.embedding <=> $1::vector
+        p.embedding <=> $1::vector ASC -- Sort by distance (lower = more relevant)
       LIMIT $2::bigint
     `;
 
@@ -815,10 +838,14 @@ export class PostsService {
       sql,
       embeddingString,
       limitInt,
+      similarityThreshold,
     );
 
     if (!vectorResults || vectorResults.length === 0) {
-      console.log(`[SEARCH] No results for query: "${query}"`);
+      this.logger.debug(
+        `[SEARCH] No results for query: "${query}" with threshold ${similarityThreshold}`,
+        'POSTS',
+      );
       return [];
     }
 
@@ -858,8 +885,9 @@ export class PostsService {
     const formattedResults = filtered.map((p) => this._formatPostResponse(p));
     await this.redis.set(cacheKey, JSON.stringify(formattedResults), 1800); // 30 min cache
 
-    console.log(
-      `[SEARCH] Found ${formattedResults.length} results for query: "${query}"`,
+    this.logger.log(
+      `[SEARCH] Found ${formattedResults.length} results for query: "${query}" (threshold: ${similarityThreshold})`,
+      'POSTS',
     );
     return formattedResults;
   }
