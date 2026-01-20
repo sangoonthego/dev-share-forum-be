@@ -83,3 +83,37 @@ export class UserProfileResponse {
 export class AuthResponse {
     access_token: string;
 }
+
+// 6. OAuth Profile DTO (from Passport strategies)
+/**
+ * OAuthProfile - Standardized OAuth user profile from Passport strategies
+ * 
+ * Used by Google and GitHub strategies to return user info
+ * Contains provider-specific IDs for account linking
+ */
+export interface OAuthProfile {
+    provider: 'google' | 'github'; // Which OAuth provider
+    providerId: string; // Provider's unique user ID (googleId / githubId)
+    email: string;
+    full_name: string | null;
+    profile_avatar: string | null;
+    // Provider-specific fields
+    googleId?: string;
+    githubId?: string;
+    githubUsername?: string;
+}
+
+/**
+ * OAuthUserResponse - User data returned after OAuth validation
+ * 
+ * Includes tokens for immediate login after OAuth callback
+ */
+export interface OAuthUserResponse {
+    id: number;
+    email: string;
+    full_name: string | null;
+    profile_avatar: string | null;
+    // Include tokens for frontend to store
+    access_token: string;
+    refresh_token: string;
+}
