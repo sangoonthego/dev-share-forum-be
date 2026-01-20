@@ -7,6 +7,7 @@ export class JwtPayload {
     role: string;
     version: number; // revoke all of tokens when change pass
     jti?: string; // JWT ID for blacklisting
+    family: string;
 }
 
 export interface Tokens {
