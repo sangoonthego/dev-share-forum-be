@@ -22,6 +22,7 @@
   "dependencies": {
     "@google/generative-ai": "^0.24.1",
     "@liaoliaots/nestjs-redis": "^10.0.0",
+    "@nestjs/bull": "^10.2.1",
     "@nestjs/common": "^11.0.1",
     "@nestjs/core": "^11.0.1",
     "@nestjs/jwt": "^11.0.2",
@@ -34,8 +35,11 @@
     "@prisma/adapter-pg": "^7.2.0",
     "@prisma/client": "^7.2.0",
     "@prisma/config": "^7.2.0",
+    "@sentry/nestjs": "^10.0.0",
+    "@sentry/tracing": "^7.120.0",
     "bcrypt": "^6.0.0",
     "bcryptjs": "^3.0.3",
+    "bull": "^4.16.5",
     "class-transformer": "^0.5.1",
     "class-validator": "^0.14.3",
     "cloudinary": "^2.8.0",
@@ -45,12 +49,15 @@
     "nanoid": "^5.1.6",
     "openai": "^6.16.0",
     "passport": "^0.7.0",
+    "passport-github2": "^0.1.12",
+    "passport-google-oauth20": "^2.0.0",
     "passport-jwt": "^4.0.1",
     "pg": "^8.16.3",
     "reflect-metadata": "^0.2.2",
     "rxjs": "^7.8.1",
     "socket.io": "^4.8.3",
-    "uuid": "^13.0.0"
+    "uuid": "^13.0.0",
+    "winston": "^3.14.2"
   },
   "devDependencies": {
     "@eslint/eslintrc": "^3.2.0",
