@@ -16,18 +16,6 @@ interface ErrorResponse {
   path: string;
 }
 
-/**
- * GlobalExceptionFilter - Xử lý tất cả exceptions
- * 
- * Trả lỗi theo format chuẩn:
- * {
- *   "statusCode": 400,
- *   "message": "Email is required",
- *   "error": "Bad Request",
- *   "timestamp": "2026-01-04T12:00:00Z",
- *   "path": "/auth/register"
- * }
- */
 @Catch()
 export class GlobalExceptionFilter implements ExceptionFilter {
   private readonly logger = new Logger(GlobalExceptionFilter.name);

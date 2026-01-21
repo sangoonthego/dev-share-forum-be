@@ -7,12 +7,10 @@ interface RateLimitStore {
 
 @Injectable()
 export class RateLimitGuard implements CanActivate {
-  // In-memory store (for production use Redis)
   private store: RateLimitStore = {};
 
-  // Config
   private readonly MAX_ATTEMPTS = 5;
-  private readonly WINDOW_MS = 2 * 60 * 1000; // 15 minutes
+  private readonly WINDOW_MS = 2 * 60 * 1000; 
 
   canActivate(context: ExecutionContext): boolean {
     const request = context.switchToHttp().getRequest<Request>();
@@ -23,26 +21,21 @@ export class RateLimitGuard implements CanActivate {
       return true; // Allow if email not provided (let validation handle it)
     }
 
-    // Create unique key for rate limiting
     const key = `${email}:${ip}`;
 
-    // Get or initialize rate limit entry
     const now = Date.now();
     const entry = this.store[key];
 
     if (!entry || now > entry.resetTime) {
-      // Window expired, reset
       this.store[key] = { attempts: 1, resetTime: now + this.WINDOW_MS };
       return true;
     }
 
-    // Within window
     if (entry.attempts < this.MAX_ATTEMPTS) {
       entry.attempts++;
       return true;
     }
 
-    // Exceeded limit
     const remainingTime = Math.ceil((entry.resetTime - now) / 1000);
     throw new HttpException(
       `Too many login attempts. Try again in ${remainingTime} seconds.`,
