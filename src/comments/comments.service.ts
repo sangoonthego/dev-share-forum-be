@@ -15,40 +15,10 @@ import { CommentResponseDto, PaginatedCommentsResponseDto } from './dto/comment-
 import DOMPurify from 'isomorphic-dompurify';
 import { CommentTreeUtility } from './utils/comment-tree.utility';
 
-/**
- * CommentsService - Production-grade nested comment management with anti-abuse hardening
- *
- * **ANTI-ABUSE FEATURES:**
- *
- * 1. **Max Depth Limit (5 Levels)**
- *    - Prevents infinite nesting that degrades UX and performance
- *    - Comments at depth 4 are "final level" - replies stay at depth 5
- *
- * 2. **Atomic Reaction Counters**
- *    - Uses Prisma `increment` for thread-safe like/dislike operations
- *    - No race conditions even with concurrent requests
- *
- * 3. **Lazy Loading for Deep Branches**
- *    - Initially fetch only root comments (depth 0)
- *    - User requests expand → fetch replies on-demand
- *
- * 4. **User Ban Handling**
- *    - When user is banned: all their comments marked `deleted_at` timestamp
- *    - UI shows "User banned" placeholder instead of content
- *
- * 5. **Real-time Notifications**
- *    - Integrated with NotificationsService for persistence
- *    - Integrated with NotificationsGateway for WebSocket push
- *
- * **Caching Strategy:**
- * - Cache Keys: comments:post:{postId}:full, comments:post:{postId}:root
- * - Invalidated on: create, update, delete, ban
- * - TTL: 1 hour (configurable)
- */
 @Injectable()
 export class CommentsService {
-  private readonly CACHE_TTL = 3600; // 1 hour in seconds
-  private readonly MAX_COMMENT_DEPTH = 5; // Max nesting level (0-5 = 6 levels)
+  private readonly CACHE_TTL = 3600; 
+  private readonly MAX_COMMENT_DEPTH = 5; 
   private readonly logger = new Logger(CommentsService.name);
 
   constructor(
@@ -59,44 +29,12 @@ export class CommentsService {
     private userActivityService: UserActivityService,
   ) {}
 
-  /**
-   * Create comment with max depth enforcement and parent validation
-   *
-   * **Workflow:**
-   * 1. Sanitize content (XSS prevention)
-   * 2. Validate post exists (not soft-deleted)
-   * 3. If parentId: validate parent exists, calculate child depth
-   * 4. Check max depth limit (cap at 5)
-   * 5. Create comment with calculated depth atomically
-   * 6. Trigger notifications
-   * 7. Invalidate cache
-   * 8. Return comment
-   *
-   * **Depth Calculation Example:**
-   * ```
-   * Parent depth 0 → Child depth 1
-   * Parent depth 4 → Child depth 5
-   * Parent depth 5 → Child depth 5 (capped)
-   * ```
-   *
-   * **Notifications:**
-   * - Reply to comment → Notify parent comment author
-   * - Comment on post → Notify post author
-   *
-   * @param userId - Author user ID
-   * @param dto - CreateCommentDto
-   * @returns Created comment with author details and calculated depth
-   * @throws BadRequestException if max depth exceeded or parent invalid
-   * @throws NotFoundException if post or parent not found
-   */
   async createComment(
     userId: number,
     dto: CreateCommentDto,
   ): Promise<CommentResponseDto> {
-    // 1. Sanitize content to prevent XSS
     const sanitizedContent = DOMPurify.sanitize(dto.content);
 
-    // 2. Validate post exists and not soft-deleted
     const post = await this.prisma.posts.findUnique({
       where: { id: dto.postId },
       select: { id: true, author_id: true },
@@ -106,7 +44,6 @@ export class CommentsService {
       throw new NotFoundException(`Post with ID ${dto.postId} not found`);
     }
 
-    // 3. Calculate depth and validate max depth
     let commentDepth = 0;
     let parentAuthorId: number | null = null;
 
@@ -133,7 +70,6 @@ export class CommentsService {
         );
       }
 
-      // Calculate child depth (capped at MAX_COMMENT_DEPTH)
       commentDepth = Math.min(
         parentComment.depth + 1,
         this.MAX_COMMENT_DEPTH,
@@ -142,7 +78,6 @@ export class CommentsService {
       parentAuthorId = parentComment.author_id;
     }
 
-    // 4. Create comment atomically with calculated depth
     const comment = await this.prisma.comments.create({
       data: {
         content: sanitizedContent,
@@ -164,7 +99,6 @@ export class CommentsService {
       },
     });
 
-    // 5. Trigger notifications
     await this._triggerCommentNotifications(
       comment,
       post,
@@ -172,38 +106,17 @@ export class CommentsService {
       userId,
     );
 
-    // 5b. Log activity for contribution tracking
     await this.userActivityService
       .logActivity(userId, 'COMMENT_CREATED', dto.postId, comment.id)
       .catch((err) =>
         console.error('Failed to log COMMENT_CREATED activity:', err),
       );
 
-    // 6. Invalidate comment tree cache
     await this._invalidateCommentCache(dto.postId);
 
     return this._formatComment(comment);
   }
 
-  /**
-   * Get all comments for a post as hierarchical tree with lazy loading support
-   *
-   * **Strategy:**
-   * 1. Check Redis cache first
-   * 2. If cache miss, query root comments (depth 0)
-   * 3. Optionally fetch deeper levels if includeReplies=true
-   * 4. Build tree structure
-   * 5. Cache result
-   *
-   * **Lazy Loading:**
-   * - Set includeReplies=false for initial load (faster)
-   * - Frontend requests specific replies on-demand
-   * - Reduces initial payload for posts with 1000+ comments
-   *
-   * @param postId - Post ID
-   * @param includeReplies - Fetch entire tree or root only (default: true)
-   * @returns Hierarchical comment tree with total count
-   */
   async getCommentsByPost(
     postId: number,
     includeReplies: boolean = true,
@@ -252,7 +165,6 @@ export class CommentsService {
         orderBy: { created_at: 'asc' },
       });
     } else {
-      // Lazy loading: root comments only (depth 0)
       flatComments = await this.prisma.comments.findMany({
         where: {
           post_id: postId,
@@ -291,10 +203,8 @@ export class CommentsService {
       })),
     );
 
-    // Format comments in tree
     const formattedTree = this._formatCommentTree(tree);
 
-    // Cache the tree
     const serialized = JSON.stringify(formattedTree);
     await this.redis.set(cacheKey, serialized, this.CACHE_TTL);
 
@@ -306,12 +216,6 @@ export class CommentsService {
     };
   }
 
-  /**
-   * Get single comment by ID with full details
-   *
-   * @param commentId - Comment ID
-   * @returns Comment details with author info
-   */
   async getCommentById(commentId: number): Promise<CommentResponseDto> {
     const comment = await this.prisma.comments.findUnique({
       where: { id: commentId },
@@ -335,14 +239,6 @@ export class CommentsService {
     return this._formatComment(comment);
   }
 
-  /**
-   * Get replies for a specific comment (lazy loading)
-   *
-   * Fetches direct children of a comment for on-demand expansion
-   *
-   * @param commentId - Parent comment ID
-   * @returns Array of direct child comments
-   */
   async getRepliesByCommentId(commentId: number): Promise<CommentResponseDto[]> {
     const replies = await this.prisma.comments.findMany({
       where: { parent_id: commentId },
@@ -363,15 +259,6 @@ export class CommentsService {
     return replies.map((r) => this._formatComment(r));
   }
 
-  /**
-   * Add reaction (like) to comment - ATOMIC operation
-   *
-   * Uses Prisma `increment` for thread-safe counter updates
-   * No race conditions even with 1000s concurrent requests
-   *
-   * @param commentId - Comment ID
-   * @returns Updated likes count
-   */
   async likeComment(commentId: number): Promise<number> {
     const updated = await this.prisma.comments.update({
       where: { id: commentId },
@@ -382,12 +269,6 @@ export class CommentsService {
     return updated.likes;
   }
 
-  /**
-   * Remove reaction (dislike) from comment - ATOMIC operation
-   *
-   * @param commentId - Comment ID
-   * @returns Updated dislikes count
-   */
   async dislikeComment(commentId: number): Promise<number> {
     const updated = await this.prisma.comments.update({
       where: { id: commentId },
@@ -398,19 +279,6 @@ export class CommentsService {
     return updated.dislikes;
   }
 
-  /**
-   * Update comment (only author or admin allowed)
-   *
-   * **Workflow:**
-   * 1. Fetch comment to verify existence
-   * 2. Sanitize new content
-   * 3. Update atomically
-   * 4. Invalidate cache
-   *
-   * @param commentId - Comment ID
-   * @param content - New content
-   * @returns Updated comment
-   */
   async updateComment(
     commentId: number,
     content: string,
@@ -454,19 +322,6 @@ export class CommentsService {
     return this._formatComment(updated);
   }
 
-  /**
-   * Soft delete comment (mark with deleted_at)
-   *
-   * **Benefits:**
-   * - Children replies preserved (don't become orphans)
-   * - Maintains conversation context
-   * - UI shows "Comment removed" placeholder
-   * - Can be restored if needed
-   * - Audit trail preserved
-   *
-   * @param commentId - Comment ID to delete
-   * @returns Soft-deleted comment
-   */
   async deleteComment(commentId: number): Promise<CommentResponseDto> {
     // 1. Fetch comment
     const existingComment = await this.prisma.comments.findUnique({
@@ -505,36 +360,15 @@ export class CommentsService {
     return this._formatComment(deleted);
   }
 
-  /**
-   * **BAN HANDLING: Automatically hide all comments by banned user**
-   *
-   * Workflow:
-   * 1. Find all comments by banned user
-   * 2. Mark all as soft-deleted (deleted_at = now)
-   * 3. Invalidate caches for all affected posts
-   * 4. Log action for audit trail
-   *
-   * Result:
-   * - User's comments show "User banned" in UI
-   * - Children replies preserved
-   * - No data loss (audit trail intact)
-   *
-   * **Called by:** Auth service when user is banned
-   *
-   * @param userId - User ID to ban
-   * @returns Count of comments hidden
-   */
   async hideAllCommentsByUser(userId: number): Promise<number> {
-    // Find all comments by this user
     const userComments = await this.prisma.comments.findMany({
       where: {
         author_id: userId,
-        deleted_at: null, // Only non-deleted comments
+        deleted_at: null,
       },
       select: { id: true, post_id: true },
     });
 
-    // Mark all as soft-deleted
     const result = await this.prisma.comments.updateMany({
       where: { author_id: userId, deleted_at: null },
       data: { deleted_at: new Date() },
@@ -553,12 +387,6 @@ export class CommentsService {
     return result.count;
   }
 
-  /**
-   * Format single comment from database record to DTO
-   *
-   * Maps snake_case to camelCase
-   * Handles deleted content and banned users
-   */
   private _formatComment(comment: any): CommentResponseDto {
     const isDeleted = comment.deleted_at !== null;
     const isUserBanned = comment.author?.is_banned;
@@ -595,9 +423,6 @@ export class CommentsService {
     };
   }
 
-  /**
-   * Format entire comment tree from utility output to DTO
-   */
   private _formatCommentTree(tree: any[]): CommentResponseDto[] {
     return tree.map((comment) => {
       const isUserBanned = comment.author?.is_banned;
@@ -634,38 +459,11 @@ export class CommentsService {
     });
   }
 
-  /**
-   * Invalidate Redis cache for a post's comments
-   *
-   * Called on: create, update, delete, ban
-   */
   private async _invalidateCommentCache(postId: number): Promise<void> {
     await this.redis.del(`comments:post:${postId}:full`);
     await this.redis.del(`comments:post:${postId}:root`);
   }
 
-  /**
-   * **INTERNAL: Trigger notifications for new comments**
-   *
-   * Sends notifications to:
-   * 1. Post author (if comment on post)
-   * 2. Parent comment author (if reply to comment)
-   *
-   * **Notification Flow:**
-   * - Save to PostgreSQL via NotificationsService
-   * - Push to online user via NotificationsGateway
-   * - Offline users get notifications on next login
-   *
-   * **Null Safety:**
-   * - Validates comment.author exists before accessing full_name
-   * - Converts undefined values to null for DTO compatibility
-   * - Auto-adds timestamp in gateway
-   *
-   * @param comment - Created comment
-   * @param post - Post info (contains author_id)
-   * @param parentAuthorId - Parent comment author (if reply)
-   * @param userId - Commenter user ID
-   */
   private async _triggerCommentNotifications(
     comment: any,
     post: any,
@@ -673,7 +471,6 @@ export class CommentsService {
     userId: number,
   ): Promise<void> {
     try {
-      // Strict null-check: ensure comment.author exists before accessing properties
       if (!comment || !comment.author) {
         this.logger.warn(
           `[NOTIFICATION] Skipping: comment or author is undefined`,
@@ -727,7 +524,6 @@ export class CommentsService {
             related_user_id: userId,
           });
 
-        // Ensure null-safety: convert undefined to null
         await this.notificationsGateway.notifyUser(parentAuthorId, {
           id: replyNotif.id,
           title: replyNotif.title,
@@ -745,7 +541,6 @@ export class CommentsService {
         );
       }
     } catch (error) {
-      // Don't fail comment creation if notifications fail
       this.logger.warn(
         `[NOTIFICATION ERROR] Failed to trigger notifications: ${error.message}`,
       );

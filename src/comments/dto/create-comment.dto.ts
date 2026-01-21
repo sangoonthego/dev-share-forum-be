@@ -8,18 +8,6 @@ import {
 } from 'class-validator';
 import { Transform } from 'class-transformer';
 
-/**
- * CreateCommentDto - Request DTO for creating comments
- * 
- * Validations:
- * - content: 1-5000 characters (sanitized by service)
- * - postId: positive integer
- * - parentId: optional positive integer (for nested replies)
- * 
- * Security:
- * - Content is trimmed and later sanitized using isomorphic-dompurify
- * - XSS prevention is handled at service level
- */
 export class CreateCommentDto {
   @IsString({ message: 'Content must be a string' })
   @MinLength(1, { message: 'Content must be at least 1 character' })
