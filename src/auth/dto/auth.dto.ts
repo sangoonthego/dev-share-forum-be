@@ -1,12 +1,11 @@
 import { IsEmail, IsNotEmpty, IsString, MinLength, IsOptional, Matches } from 'class-validator';
 
-// 1. JWT & Token Interfaces
 export class JwtPayload {
     sub: number;
     email: string;
     role: string;
-    version: number; // revoke all of tokens when change pass
-    jti?: string; // JWT ID for blacklisting
+    version: number; 
+    jti?: string; 
     family: string;
 }
 
@@ -15,7 +14,6 @@ export interface Tokens {
     refresh_token: string;
 }
 
-// 2. Register DTO
 export class RegisterDto {
     @IsEmail({}, { message: 'Invalid email format' })
     @IsNotEmpty({ message: 'Email is required' })
@@ -41,7 +39,6 @@ export class RegisterDto {
     phone?: string;
 }
 
-// 3. Login DTO
 export class LoginDto {
     @IsEmail({}, { message: 'Invalid email format' })
     @IsNotEmpty({ message: 'Email is required' })
@@ -52,7 +49,6 @@ export class LoginDto {
     password: string;
 };
 
-// 4. Change Password DTO
 export class ChangePasswordDto {
     @IsString()
     @IsNotEmpty({ message: 'Current password is required' })
@@ -68,7 +64,6 @@ export class ChangePasswordDto {
     new_password_confirm: string;
 }
 
-// 5. Response DTOs
 export class UserProfileResponse {
     id: number;
     email: string;
@@ -85,13 +80,6 @@ export class AuthResponse {
     access_token: string;
 }
 
-// 6. OAuth Profile DTO (from Passport strategies)
-/**
- * OAuthProfile - Standardized OAuth user profile from Passport strategies
- * 
- * Used by Google and GitHub strategies to return user info
- * Contains provider-specific IDs for account linking
- */
 export interface OAuthProfile {
     provider: 'google' | 'github'; // Which OAuth provider
     providerId: string; // Provider's unique user ID (googleId / githubId)
@@ -104,11 +92,6 @@ export interface OAuthProfile {
     githubUsername?: string;
 }
 
-/**
- * OAuthUserResponse - User data returned after OAuth validation
- * 
- * Includes tokens for immediate login after OAuth callback
- */
 export interface OAuthUserResponse {
     id: number;
     email: string;

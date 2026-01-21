@@ -23,7 +23,6 @@ export class LoginService {
       where: { email: dto.email },
     });
 
-    // Failed attempt - log it
     if (!user) {
       await this.auditService.logLoginAttempt(
         null,
@@ -37,7 +36,6 @@ export class LoginService {
 
     const passwordMatches = await bcrypt.compare(dto.password, user.password_hash);
 
-    // Password mismatch - log it
     if (!passwordMatches) {
       await this.auditService.logLoginAttempt(
         null,
@@ -49,7 +47,6 @@ export class LoginService {
       throw new UnauthorizedException('Invalid credentials');
     }
 
-    // Get tokens with token_version (for password change detection)
     const tokens = await this.tokenService.getTokens(
       user.id,
       user.email,
@@ -57,7 +54,6 @@ export class LoginService {
       user.token_version,
     );
 
-    // Log successful login + clear failed attempts from Redis
     await this.auditService.logLoginAttempt(
       user.id,
       LoginStatus.SUCCESS,
@@ -65,7 +61,6 @@ export class LoginService {
       userAgent,
     );
 
-    // Clear rate limit counter after successful login
     await this.auditService.clearFailedAttempts(user.email, ipAddress);
 
     return tokens;

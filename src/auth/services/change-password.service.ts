@@ -4,15 +4,6 @@ import { RedisService } from 'src/redis/redis.service';
 import * as bcrypt from 'bcrypt';
 import { ChangePasswordDto } from '../dto/auth.dto';
 
-/**
- * ChangePasswordService - Password Change with Token Revocation
- * 
- * Workflow:
- * 1. Verify current password
- * 2. Hash new password
- * 3. Update in DB + increment token_version
- * 4. Revoke all refresh tokens in Redis
- */
 @Injectable()
 export class ChangePasswordService {
   constructor(
@@ -21,7 +12,6 @@ export class ChangePasswordService {
   ) {}
 
   async execute(userId: number, dto: ChangePasswordDto): Promise<{ success: boolean }> {
-    // 1. Validation
     if (dto.new_password !== dto.new_password_confirm) {
       throw new BadRequestException('New passwords do not match');
     }
@@ -32,7 +22,6 @@ export class ChangePasswordService {
       );
     }
 
-    // 2. Get user
     const user = await this.prisma.users.findUnique({
       where: { id: userId },
     });
@@ -41,7 +30,6 @@ export class ChangePasswordService {
       throw new UnauthorizedException('User not found');
     }
 
-    // 3. Verify current password
     const passwordMatches = await bcrypt.compare(
       dto.current_password,
       user.password_hash,
@@ -51,21 +39,18 @@ export class ChangePasswordService {
       throw new UnauthorizedException('Current password is incorrect');
     }
 
-    // 4. Hash new password
     const newPasswordHash = await bcrypt.hash(dto.new_password, 10);
 
-    // 5. Update user: new password + increment token_version
     await this.prisma.users.update({
       where: { id: userId },
       data: {
         password_hash: newPasswordHash,
         token_version: {
-          increment: 1, // This invalidates all existing tokens
+          increment: 1,
         },
       },
     });
 
-    // 6. Revoke all refresh tokens in Redis
     await this.redisService.revokeAllTokens(userId);
 
     return { success: true };

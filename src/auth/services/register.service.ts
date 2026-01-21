@@ -26,11 +26,10 @@ export class RegisterService {
         email: dto.email,
         password_hash: passwordHash,
         full_name: dto.full_name,
-        token_version: 1, // Start at version 1
+        token_version: 1, 
       },
     });
 
-    // Get tokens with token_version
     const tokens = await this.tokenService.getTokens(
       newUser.id,
       newUser.email,

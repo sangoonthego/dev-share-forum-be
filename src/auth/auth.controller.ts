@@ -46,22 +46,13 @@ export class AuthController {
 
     const tokens = await this.loginService.execute(dto, ipAddress, userAgent);
 
-    // ═══════════════════════════════════════════════════════════════════════
-    // SECURE COOKIE CONFIG
-    // ═══════════════════════════════════════════════════════════════════════
-    // httpOnly: Prevents JavaScript access (XSS protection)
-    // secure: Only sent over HTTPS in production
-    // sameSite: 'Strict' prevents CSRF attacks
-    //   - 'Strict': Cookie not sent even in cross-site navigation
-    //   - 'Lax': Sent only for top-level navigation (safer, SPA friendly)
-    // maxAge: 7 days = 604,800,000 ms
     res.cookie('refresh_token', tokens.refresh_token, {
       httpOnly: true, // Prevent XSS access
-      secure: process.env.NODE_ENV === 'production', // HTTPS only in prod
-      sameSite: 'strict', // CSRF protection (or 'lax' for SPA)
-      maxAge: 7 * 24 * 60 * 60 * 1000, // 7 days
-      path: '/', // Available site-wide
-      domain: process.env.COOKIE_DOMAIN, // Optional: specify domain
+      secure: process.env.NODE_ENV === 'production', 
+      sameSite: 'strict', 
+      maxAge: 7 * 24 * 60 * 60 * 1000, 
+      path: '/', 
+      domain: process.env.COOKIE_DOMAIN, 
     });
 
     return { access_token: tokens.access_token };
@@ -77,8 +68,6 @@ export class AuthController {
     // Calculate remaining expiry time (JWT typically expires in 15 minutes)
     const expiresIn = 15 * 60; // 15 minutes
 
-    // Blacklist JWT + revoke all RT
-    // JTI must be provided for blacklisting
     if (user.jti) {
       await this.authService.logout(user.jti, user.sub, expiresIn);
     } else {
@@ -135,14 +124,6 @@ export class AuthController {
     return this.changePasswordService.execute(userId, dto);
   }
 
-  /**
-   * GET /auth/google - Initiate Google OAuth2 flow
-   * 
-   * Public endpoint - redirects to Google consent screen
-   * Query params:
-   * - redirect_uri: Optional. Frontend URL to redirect after callback
-   *   (Used to return user to original page after OAuth)
-   */
   @Get('google')
   @Public()
   @UseGuards(GoogleAuthGuard)
@@ -153,25 +134,6 @@ export class AuthController {
     // This method exists for route registration only
   }
 
-  /**
-   * GET /auth/google/callback - Google OAuth2 callback
-   * 
-   * Called by Google after user authorizes.
-   * Flow:
-   * 1. Google redirects with authorization code
-   * 2. Passport exchanges code for tokens
-   * 3. GoogleStrategy.validate() is called with user profile
-   * 4. AuthService.validateOAuthUser() handles account linking
-   * 5. User object (with tokens) is available in req.user
-   * 6. Set httpOnly cookie with refresh token
-   * 7. Redirect to frontend with access token in URL or session
-   * 
-   * Frontend should:
-   * - Extract access_token from URL or response
-   * - Store in memory (not localStorage - XSS safer)
-   * - Use Authorization: Bearer <token> for API calls
-   * - Refresh Token is auto-sent in httpOnly cookie
-   */
   @Get('google/callback')
   @Public()
   @UseGuards(GoogleAuthGuard)
@@ -187,18 +149,15 @@ export class AuthController {
       );
     }
 
-    // Set httpOnly cookie with Refresh Token
     res.cookie('refresh_token', user.refresh_token, {
       httpOnly: true,
       secure: process.env.NODE_ENV === 'production',
-      sameSite: 'lax', // Lax for cross-site OAuth callback
-      maxAge: 7 * 24 * 60 * 60 * 1000, // 7 days
+      sameSite: 'lax', 
+      maxAge: 7 * 24 * 60 * 60 * 1000, 
       path: '/',
       domain: process.env.COOKIE_DOMAIN,
     });
 
-    // Redirect to frontend with access token
-    // Frontend will extract token from URL and store in memory
     const redirectUrl = new URL(
       `${process.env.FRONTEND_URL}/auth/oauth-callback`,
     );
@@ -209,13 +168,6 @@ export class AuthController {
     return res.redirect(redirectUrl.toString());
   }
 
-  /**
-   * GET /auth/github - Initiate GitHub OAuth2 flow
-   * 
-   * Public endpoint - redirects to GitHub authorization screen
-   * Query params:
-   * - redirect_uri: Optional. Frontend URL to redirect after callback
-   */
   @Get('github')
   @Public()
   @UseGuards(GitHubAuthGuard)
@@ -226,25 +178,6 @@ export class AuthController {
     // This method exists for route registration only
   }
 
-  /**
-   * GET /auth/github/callback - GitHub OAuth2 callback
-   * 
-   * Called by GitHub after user authorizes.
-   * Flow:
-   * 1. GitHub redirects with authorization code
-   * 2. Passport exchanges code for tokens
-   * 3. GitHubStrategy.validate() is called with user profile
-   * 4. AuthService.validateOAuthUser() handles account linking
-   * 5. User object (with tokens) is available in req.user
-   * 6. Set httpOnly cookie with refresh token
-   * 7. Redirect to frontend with access token in URL or session
-   * 
-   * Frontend should:
-   * - Extract access_token from URL or response
-   * - Store in memory (not localStorage - XSS safer)
-   * - Use Authorization: Bearer <token> for API calls
-   * - Refresh Token is auto-sent in httpOnly cookie
-   */
   @Get('github/callback')
   @Public()
   @UseGuards(GitHubAuthGuard)
@@ -282,16 +215,6 @@ export class AuthController {
     return res.redirect(redirectUrl.toString());
   }
 
-  /**
-   * ═══════════════════════════════════════════════════════════════════════
-   * END OF OAUTH2 ENDPOINTS
-   * ═══════════════════════════════════════════════════════════════════════
-   */
-
-  /**
-   * Extract client IP from request
-   * Considers X-Forwarded-For header for proxies
-   */
   private getClientIp(request: Request): string {
     const forwarded = request.get('x-forwarded-for');
     if (forwarded) {

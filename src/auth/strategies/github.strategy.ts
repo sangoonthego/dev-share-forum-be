@@ -4,29 +4,6 @@ import { Strategy, VerifyCallback } from 'passport-github2';
 import { AuthService } from '../services/auth.service';
 import { OAuthProfile } from '../dto/auth.dto';
 
-/**
- * GitHubStrategy - OAuth2 Authentication with GitHub
- *
- * Features:
- * - Uses GitHub OAuth2 flow
- * - Extracts user profile from GitHub API
- * - Delegates to AuthService for account linking & token generation
- *
- * Environment Variables Required:
- * - GITHUB_CLIENT_ID: OAuth App Client ID
- * - GITHUB_CLIENT_SECRET: OAuth App Client Secret
- * - GITHUB_CALLBACK_URL: Redirect URL (e.g., http://localhost:3000/auth/github/callback)
- *
- * Flow:
- * 1. User clicks "Sign in with GitHub"
- * 2. Frontend redirects to GET /auth/github
- * 3. Passport redirects to GitHub OAuth2 authorization screen
- * 4. User authorizes
- * 5. GitHub redirects to /auth/github/callback with authorization code
- * 6. Passport exchanges code for tokens and calls verify()
- * 7. verify() validates user and returns profile
- * 8. Auth controller handles token generation & cookie setup
- */
 @Injectable()
 export class GitHubStrategy extends PassportStrategy(Strategy, 'github') {
   constructor(private authService: AuthService) {
@@ -38,18 +15,6 @@ export class GitHubStrategy extends PassportStrategy(Strategy, 'github') {
     });
   }
 
-  /**
-   * Validate OAuth2 token and user profile
-   *
-   * Called after GitHub verifies the authorization code and returns user profile
-   *
-   * @param accessToken - GitHub access token (for API calls, stored in user.meta for future use)
-   * @param refreshToken - GitHub refresh token (may not always be provided)
-   * @param profile - User profile from GitHub
-   * @param done - Callback function
-   *
-   * Returns: User object with OAuth info for account linking
-   */
   async validate(
     accessToken: string,
     refreshToken: string | undefined,

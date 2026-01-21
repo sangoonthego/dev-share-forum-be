@@ -16,7 +16,7 @@ import { GitHubStrategy } from './strategies/github.strategy';
 
 @Module({
   imports: [
-    PassportModule, // For OAuth2 strategies
+    PassportModule, 
     JwtModule.register({}),
   ],
   controllers: [AuthController],
@@ -30,9 +30,9 @@ import { GitHubStrategy } from './strategies/github.strategy';
     ChangePasswordService,
     AtStrategy, 
     RtStrategy,
-    GoogleStrategy, // OAuth2 strategies
+    GoogleStrategy, 
     GitHubStrategy,
   ],
-  exports: [UserService, LoginAuditService], // Export for other modules
+  exports: [UserService, LoginAuditService], 
 })
 export class AuthModule {}
