@@ -25,28 +25,6 @@ import { User } from 'src/common/decorators/user.decorator';
 import { Public } from 'src/common/decorators/public.decorator';
 import type { JwtPayload } from 'src/auth/dto/auth.dto';
 
-/**
- * PostsController - High-performance Forum Post Management
- * 
- * Features:
- * - Public read endpoints (GET)
- * - Authenticated write endpoints (POST, PATCH, DELETE)
- * - Owner verification (OwnershipGuard)
- * - Admin override for moderation
- * - Pagination with caching
- * 
- * Security:
- * - @Public() for read operations
- * - @UseGuards(AtGuard) for authenticated operations
- * - @UseGuards(OwnershipGuard) for ownership verification
- * 
- * Endpoints:
- * POST   /posts              - Create post
- * GET    /posts              - List posts (paginated)
- * GET    /posts/:slug        - Get post detail
- * PATCH  /posts/:id          - Update post
- * DELETE /posts/:id          - Delete post
- */
 @Controller('posts')
 export class PostsController {
   constructor(private postsService: PostsService) {}
@@ -54,7 +32,7 @@ export class PostsController {
   @Post()
   @HttpCode(HttpStatus.CREATED)
   @UseGuards(AtGuard)
-  @Throttle({ default: { limit: 10, ttl: 3600 } }) // 10 posts per hour
+  @Throttle({ default: { limit: 10, ttl: 3600 } }) 
   async createPost(
     @User('sub') userId: number,
     @Body() dto: CreatePostDto,
@@ -64,7 +42,7 @@ export class PostsController {
 
   @Get()
   @Public()
-  @UseGuards(AtGuard) // Soft guard - @Public() bypasses it
+  @UseGuards(AtGuard) 
   async getPostsPaginated(
     @Query('page') page?: string,
     @Query('limit') limit?: string,
@@ -75,7 +53,6 @@ export class PostsController {
     const pageNum = Math.max(1, parseInt(page || '1', 10));
     const limitNum = Math.min(50, Math.max(1, parseInt(limit || '10', 10)));
 
-    // If authenticated AND requesting all, show unpublished
     const isPublished = !(all === 'true' && userId);
 
     return this.postsService.getPostsPaginated(pageNum, limitNum, isPublished, userRole);
