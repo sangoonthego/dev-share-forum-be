@@ -18,24 +18,6 @@ import { PostResponseDto, PaginatedPostsResponseDto } from './dto/post-response.
 import DOMPurify from 'isomorphic-dompurify';
 import { nanoid } from 'nanoid';
 
-/**
- * PostsService - High-performance Post Management
- * 
- * Features:
- * - Atomic post creation with tag handling & AI embeddings
- * - SEO-friendly slug generation with duplicate handling
- * - View count atomic increment
- * - Redis cache-aside pattern for hot posts
- * - Google Gemini vector embeddings for semantic search (768 dimensions)
- * 
- * Architecture:
- * - Prisma transactions for data consistency
- * - Redis caching for frequently accessed posts
- * - EmbeddingService for Google Gemini integration
- * - pgvector support for vector similarity search
- * - Slug uniqueness via nanoid suffix
- * - Pagination with total count
- */
 @Injectable()
 export class PostsService {
   private readonly logger = new Logger(PostsService.name);
@@ -48,52 +30,13 @@ export class PostsService {
     private embeddingService: EmbeddingService,
   ) {}
 
-  /**
-   * Create post with atomic tag handling and AI embeddings
-   * 
-   * Workflow:
-   * 1. Sanitize content_markdown to prevent XSS attacks
-   * 2. Generate unique slug from title using nanoid for guaranteed uniqueness
-   * 3. Generate AI embedding from title + content (Gemini API)
-   * 4. Atomic transaction:
-   *    - Create post with status support (DRAFT or PUBLISHED)
-   *    - For each tag: find or create, then connect
-   *    - Save embedding to database (separate raw SQL query)
-   * 5. Log POST_CREATED activity (published posts only)
-   * 6. Invalidate list cache
-   * 
-   * Draft Support:
-   * - When status=DRAFT, post is not cached in Redis
-   * - Drafts are filtered from public feeds
-   * - Only author can view their drafts
-   * 
-   * Embedding Generation:
-   * - Uses Google Gemini text-embedding-004 model (768 dimensions)
-   * - Free tier available (no API costs)
-   * - Combines title + content for better semantic meaning
-   * - Saved separately via raw SQL (Prisma limitation with Unsupported types)
-   * - Error handling: Continues even if embedding fails (non-blocking)
-   * 
-   * Transaction ensures:
-   * - All tags created/connected atomically
-   * - If tag creation fails, post creation rolls back
-   * - Duplicate slug detection
-   * 
-   * Security:
-   * - Content is sanitized using DOMPurify to remove XSS vectors
-   * - No <script>, event handlers, or other malicious content can be stored
-   */
   async createPost(
     userId: number,
     dto: CreatePostDto,
   ): Promise<PostResponseDto> {
-    // 1. Sanitize content to prevent XSS
     const sanitizedContent = DOMPurify.sanitize(dto.content_markdown);
-
-    // 2. Generate unique slug with nanoid for guaranteed uniqueness
     const slug = await this.generateUniqueSlug(dto.title);
 
-    // 3. Generate embedding from title + content (OpenAI or mock)
     let embedding: number[] = [];
     try {
       const embeddingText = `${dto.title}. ${sanitizedContent}`.substring(0, 8000);
@@ -105,12 +48,10 @@ export class PostsService {
       this.logger.error(
         `[POSTS] Failed to generate embedding: ${error instanceof Error ? error.message : 'Unknown error'}. Post creation will continue without embedding.`,
       );
-      // Continue with post creation even if embedding fails (non-blocking)
+      
     }
 
-    // 4. Atomic transaction: create post + handle tags
     const post = await this.prisma.$transaction(async (tx) => {
-      // Create post with status support (DRAFT or PUBLISHED)
       const newPost = await tx.posts.create({
         data: {
           title: dto.title,
@@ -149,9 +90,6 @@ export class PostsService {
       return newPost;
     });
 
-    // 5. Save embedding to database (after transaction)
-    // Using raw SQL since Prisma doesn't support Unsupported("vector") types in updates
-    // IMPORTANT: Convert array to JSON string literal, then cast to vector(768)
     if (embedding.length > 0) {
       try {
         const embeddingString = JSON.stringify(embedding);
@@ -186,27 +124,6 @@ export class PostsService {
     return this._formatPostResponse(post);
   }
 
-  /**
-   * Update post with partial fields and embedding regeneration
-   * 
-   * Workflow:
-   * 1. Fetch existing post
-   * 2. Update fields: title (regenerate slug), content (sanitize), status
-   * 3. Regenerate embedding if title or content changed
-   * 4. Update tags if provided
-   * 5. Invalidate caches (detail + list)
-   * 6. Log activity for published posts
-   * 
-   * Embedding Update:
-   * - Triggered when title OR content_markdown changes
-   * - Combines new title + content for semantic meaning
-   * - Non-blocking: post update succeeds even if embedding fails
-   * - Uses raw SQL to save (Prisma limitation with Unsupported types)
-   * 
-   * Security:
-   * - Content is sanitized before update to prevent XSS injection
-   * - Slug uniqueness verified per post
-   */
   async updatePost(
     postId: number,
     userId: number,
@@ -348,17 +265,6 @@ export class PostsService {
     return this._formatPostResponse(updatedPost);
   }
 
-  /**
-   * Soft delete post - sets deleted_at timestamp
-   * 
-   * Instead of hard delete, marks post as deleted
-   * Soft-deleted posts are:
-   * - Filtered out from all queries for non-ADMIN users
-   * - Only visible to ADMIN users for moderation purposes
-   * - Can be permanently deleted later if needed
-   * 
-   * Invalidates relevant caches
-   */
   async deletePost(postId: number, userId?: number): Promise<void> {
     const post = await this.prisma.posts.findUnique({
       where: { id: postId },
@@ -407,23 +313,6 @@ export class PostsService {
     await this._invalidateListCaches();
   }
 
-  /**
-   * Get post by slug with Redis cache-aside pattern
-   * 
-   * Filters out soft-deleted posts (deleted_at is not null)
-   * Only ADMIN users can access soft-deleted posts
-   * 
-   * Cache strategy:
-   * 1. Check Redis cache first
-   * 2. If miss, query DB (with soft delete filter)
-   * 3. Store in Redis for 1 hour (hot post)
-   * 4. Increment view count atomically
-   * 5. Return post
-   * 
-   * Access Control:
-   * - Non-ADMIN users cannot see soft-deleted posts
-   * - ADMIN users can see all posts including soft-deleted
-   */
   async getPostBySlug(slug: string, userRole?: string): Promise<PostResponseDto> {
     const cacheKey = `post:slug:${slug}`;
 
@@ -482,19 +371,6 @@ export class PostsService {
     return formatted;
   }
 
-  /**
-   * Get paginated posts with optional filters
-   * 
-   * Automatically filters out soft-deleted posts for non-ADMIN users
-   * ADMIN users can see all posts including soft-deleted ones
-   * 
-   * Query strategy:
-   * - Check cache for list first
-   * - Only published posts for public
-   * - All posts for authenticated users
-   * - Filter soft-deleted posts (deleted_at is null) for non-ADMIN
-   * - Eager load author and tags
-   */
   async getPostsPaginated(
     page: number = 1,
     limit: number = 10,
@@ -512,8 +388,8 @@ export class PostsService {
 
     // Build where clause - exclude soft-deleted for non-ADMIN, exclude DRAFT posts
     const whereClause: any = {
-      deleted_at: null, // Always exclude soft-deleted
-      status: 'PUBLISHED', // Only published posts in public feed
+      deleted_at: null, 
+      status: 'PUBLISHED', 
     };
     if (isPublished) {
       whereClause.is_published = true;
@@ -562,25 +438,6 @@ export class PostsService {
     return response;
   }
 
-  /**
-   * Generate unique slug from title using nanoid
-   * 
-   * Strategy (Improved for Performance):
-   * 1. Slugify title (lowercase, replace spaces with hyphens)
-   * 2. Append nanoid(5) for guaranteed uniqueness
-   * 3. Single DB check to verify uniqueness
-   * 4. If collision (rare), regenerate with new nanoid
-   * 
-   * Benefits over counter-based approach:
-   * - Minimizes DB hits (usually just 1)
-   * - No sequential counter predictability issues
-   * - Better distributed generation for multi-instance deployments
-   * - Lower latency for slug generation
-   * 
-   * Format: "my-awesome-title-abc12"
-   * 
-   * Excludes current post ID to allow re-slugifying on update
-   */
   private async generateUniqueSlug(
     title: string,
     excludePostId?: number,
@@ -627,20 +484,7 @@ export class PostsService {
     });
   }
 
-  /**
-   * Generate mock AI embedding (placeholder for pgvector)
-   * 
-   * Real implementation would:
-   * - Call OpenAI API / HuggingFace / local model
-   * - Generate 768-dimensional vector
-   * - Handle rate limiting
-   * - Cache embeddings
-   * 
-   * Mock returns random floats for testing
-   */
   private _generateEmbedding(content: string): number[] {
-    // Mock: return random 768-dimensional vector
-    // In production, call actual embedding service
     const embedding: number[] = [];
     for (let i = 0; i < 768; i++) {
       embedding.push(Math.random());
@@ -648,25 +492,15 @@ export class PostsService {
     return embedding;
   }
 
-  /**
-   * Convert string to slug format
-   * - lowercase
-   * - replace spaces/underscores with hyphens
-   * - remove special characters
-   * - remove multiple consecutive hyphens
-   */
   private _slugify(text: string): string {
     return text
       .toLowerCase()
       .trim()
-      .replace(/[^\w\s-]/g, '') // Remove special characters
-      .replace(/[\s_-]+/g, '-') // Replace spaces/underscores with hyphens
-      .replace(/^-+|-+$/g, ''); // Remove leading/trailing hyphens
+      .replace(/[^\w\s-]/g, '') 
+      .replace(/[\s_-]+/g, '-') 
+      .replace(/^-+|-+$/g, ''); 
   }
 
-  /**
-   * Format post response with tags
-   */
   private _formatPostResponse(post: any): PostResponseDto {
     return {
       id: post.id,
@@ -695,25 +529,6 @@ export class PostsService {
     };
   }
 
-  /**
-   * Invalidate all posts list caches using pattern matching
-   * 
-   * Advanced Cache Invalidation Strategy:
-   * - Uses Redis SCAN to find keys matching pattern: posts:list:page:*
-   * - SCAN is memory-efficient for pattern matching on large key sets
-   * - Deletes all matching keys in batch operations
-   * 
-   * Benefits:
-   * - Ensures pagination caches don't return stale data
-   * - Supports multi-instance Redis clusters
-   * - Memory-efficient (doesn't load all keys at once)
-   * - Single operation for any pagination state
-   * 
-   * Usage:
-   * - Called whenever posts are created, updated, or deleted
-   * - Prevents stale data in feed pagination
-   * - Works with any page/limit combination
-   */
   private async _invalidateListCaches(): Promise<void> {
     try {
       const deletedCount = await this.redis.delByPattern('posts:list:page:*');
@@ -726,55 +541,12 @@ export class PostsService {
     }
   }
 
-  /**
-   * SEMANTIC SEARCH: Search posts using vector embeddings with similarity threshold
-   * 
-   * Strategy:
-   * 1. Check Redis cache for search results (cache hit = no API call)
-   * 2. Generate embedding for query (via API or local model)
-   * 3. Query database using pgvector cosine distance (<=> operator)
-   * 4. **FILTER OUT LOW-RELEVANCE RESULTS** (distance > threshold)
-   * 5. Filter out soft-deleted and draft posts
-   * 6. Apply OwnershipGuard logic (non-authors can't see drafts)
-   * 7. Cache results for 30 minutes to reduce API costs
-   * 8. Return top 5 most relevant posts
-   * 
-   * Vector Search Details:
-   * - Uses HNSW index for O(log n) search performance
-   * - <=> operator calculates cosine distance (0-2 range)
-   * - Lower distance = higher relevance
-   * - Query size: 768 dimensions (Google Gemini standard)
-   * - **Similarity Threshold**: distance < 1.0 (filters out low-relevance results)
-   * 
-   * Similarity Threshold:
-   * - 0.0 = identical vectors (perfect match)
-   * - 0.3 = very similar (usually relevant)
-   * - 0.5 = moderately similar (sometimes relevant)
-   * - 1.0 = orthogonal (completely different)
-   * - 2.0 = opposite direction (negative correlation)
-   * 
-   * Default: 1.0 (slightly permissive, catches most relevant results)
-   * Can be tuned based on use case:
-   * - Strict: 0.5 (returns only highly relevant results)
-   * - Normal: 1.0 (balanced relevance)
-   * - Loose: 1.5 (catch more related but less relevant results)
-   * 
-   * Cost Optimization:
-   * - Redis cache reduces API calls (embedding generation is expensive)
-   * - Common queries benefit from cache hits
-   * - TTL: 30 minutes (reasonable for search freshness)
-   * 
-   * Security:
-   * - Non-ADMIN users cannot see soft-deleted posts
-   * - Non-authors cannot see draft posts
-   * - Query parameter validated
-   */
   async searchPosts(
     query: string,
     userRole?: string,
     userId?: number,
     limit: number = 5,
-    similarityThreshold: number = 1.0, // Default: catches most relevant results
+    similarityThreshold: number = 1.0, 
   ): Promise<PostResponseDto[]> {
     // Validate query
     if (!query || query.trim().length === 0) {
@@ -802,11 +574,6 @@ export class PostsService {
     const queryEmbedding = await this.generateEmbedding(query);
 
     // 3. Execute vector search using pgvector cosine distance with threshold filter
-    // SQL Query optimizations:
-    // - HNSW index for efficient approximate nearest neighbor search
-    // - WHERE distance_value < threshold to filter low-relevance results
-    // - ORDER BY distance to rank by relevance
-    // - LIMIT applied after filtering to ensure top results
     const embeddingString = JSON.stringify(queryEmbedding);
     const limitInt = Math.max(1, Math.min(limit, 100)); // Clamp between 1-100 for safety
     
@@ -892,52 +659,11 @@ export class PostsService {
     return formattedResults;
   }
 
-  /**
-   * Generate embedding for text using OpenAI API
-   * 
-   * Integration Options:
-   * 1. OpenAI text-embedding-3-small (RECOMMENDED)
-   *    - 1536 dimensions
-   *    - $0.02 per 1M tokens
-   *    - High quality embeddings
-   * 
-   * 2. OpenAI text-embedding-3-large
-   *    - 3072 dimensions
-   *    - $0.13 per 1M tokens
-   *    - Better quality, slower
-   * 
-   * 3. Local: transformers.js (optional)
-   *    - No API calls = no cost
-   *    - Slower but deterministic
-   * 
-   * Error Handling:
-   * - Falls back to mock embedding if API fails (graceful degradation)
-   * - Logs API errors for monitoring
-   * - Never throws - search still works with mock embeddings
-   * 
-   * Environment Variables Required:
-   * - GEMINI_API_KEY: Your Google Gemini API key
-   * - GEMINI_MODEL: Embedding model (default: text-embedding-004)
-   * 
-   * Using: Google Gemini text-embedding-004 (768 dimensions, FREE tier)
-   */
   async generateEmbedding(text: string): Promise<number[]> {
     // Delegate to EmbeddingService (Gemini API)
     return this.embeddingService.generateEmbedding(text);
   }
 
-  /**
-   * Generate mock embedding for local testing/fallback
-   * 
-   * Used when:
-   * - OPENAI_API_KEY is not configured
-   * - OpenAI API is unavailable
-   * - For development/testing
-   * 
-   * Note: Mock embeddings are deterministic based on text hash
-   * This allows consistent search results during testing
-   * In production, only use real embeddings from API
-   */
   private _generateMockEmbedding(text: string): number[] {
     // Deterministic: use text hash as seed
     let hash = 0;
@@ -967,20 +693,10 @@ export class PostsService {
       : embedding;
   }
 
-  /**
-   * Update post embedding when content changes
-   * 
-   * Should be called in updatePost() when content_markdown changes
-   * Uses raw SQL since Prisma doesn't support Unsupported("vector") in update operations
-   * 
-   * SQL: UPDATE posts SET embedding = $1::vector WHERE id = $2
-   */
   async updatePostEmbedding(postId: number, content: string): Promise<void> {
     try {
       const embedding = await this.generateEmbedding(content);
 
-      // Use raw SQL for vector operations (Prisma limitation)
-      // $1 = embedding array, $2 = postId
       await this.prisma.$executeRaw`
         UPDATE "posts" 
         SET embedding = ${embedding}::vector(1536)
@@ -997,51 +713,6 @@ export class PostsService {
     }
   }
 
-  /**
-   * Generate embeddings for all posts (batch operation)
-   * 
-   * Use cases:
-   * - Initial database population
-   * - Recovery from embedding failures
-   * - Re-indexing after embedding model update
-   * 
-   * Performance:
-   * - Process in batches of 10 to avoid API rate limits
-   * - Rate limit: ~3,500 requests per minute on OpenAI
-   * - Estimated time for 1,000 posts: ~20 minutes
-   * 
-   * SQL: Get posts where embedding IS NULL (using raw SQL)
-   * 
-   * CLI Usage:
-   * - Create a dedicated NestJS command or schedule task
-   * - Example: node cli.js embed-all-posts
-   */
-  /**
-   * Backfill all post embeddings with new 768-dimensional Gemini embeddings
-   * 
-   * Use Case:
-   * - Migration from OpenAI (1536 dims) to Gemini (768 dims)
-   * - Vector dimension mismatch errors in pgvector operations
-   * - Regenerate embeddings after model change
-   * 
-   * Process:
-   * 1. Fetch all posts (regardless of embedding status)
-   * 2. Generate new 768-dimensional embeddings
-   * 3. Update database with new embeddings
-   * 4. Handle failures gracefully with detailed logging
-   * 
-   * Performance:
-   * - Batch processing to avoid memory overflow
-   * - 100ms delay between requests (API rate limiting)
-   * - ~6-10 seconds per post (API + DB latency)
-   * - ~100 posts per 15 minutes
-   * 
-   * Example Usage:
-   * ```
-   * const result = await postsService.backfillEmbeddingsForAllPosts();
-   * console.log(`Success: ${result.processed}/${result.total}`);
-   * ```
-   */
   async backfillEmbeddingsForAllPosts(batchSize: number = 10): Promise<{
     total: number;
     processed: number;

@@ -129,51 +129,9 @@ export class PostsController {
     return this.postsService.getPostsPaginated(pageNum, limitNum, isPublished, userRole);
   }
 
-  /**
-   * GET /posts/search/semantic - Semantic search using vector embeddings
-   * 
-   * Query params:
-   * - query: string (required, 1-500 characters)
-   * - limit: number (optional, default: 5, max: 10)
-   * 
-   * Returns: Top 5 most relevant posts based on semantic similarity
-   * 
-   * Features:
-   * - Vector embeddings using OpenAI text-embedding-3-small API
-   * - Cosine distance similarity search via pgvector
-   * - Redis caching (30 minutes) to reduce API costs
-   * - HNSW indexing for O(log n) search performance
-   * - Filters out soft-deleted and draft posts
-   * - OwnershipGuard logic applies (non-authors can't see drafts)
-   * 
-   * Performance:
-   * - Cache hit: <10ms response
-   * - Cache miss: ~500ms-1s (includes API call)
-   * - Subsequent identical queries: instant from cache
-   * 
-   * Cost Optimization:
-   * - ~$0.00001 per search (text-embedding-3-small)
-   * - With caching, most common searches cost ~$0.00001 total
-   * 
-   * Error Handling:
-   * - If OpenAI API unavailable, falls back to mock embeddings
-   * - Search still works, quality degraded
-   * - Never blocks user request
-   * 
-   * Use Cases:
-   * - Full-text semantic search (not keyword-based)
-   * - Find posts by meaning/intent rather than exact words
-   * - Example: "How do I debug React?" finds posts about debugging JavaScript
-   * 
-   * Security:
-   * - @Public() - Anyone can use (rate-limited)
-   * - Respects OwnershipGuard logic
-   * - Query sanitized/validated
-   * - Rate limit: 100 requests per hour per IP
-   */
   @Get('search/semantic')
   @Public()
-  @Throttle({ default: { limit: 100, ttl: 3600 } }) // 100 searches per hour
+  @Throttle({ default: { limit: 100, ttl: 3600 } })
   async searchPostsSemantic(
     @Query('query') query: string,
     @Query('limit') limit?: string,
@@ -184,27 +142,6 @@ export class PostsController {
     return this.postsService.searchPosts(query, userRole, userId, limitNum);
   }
 
-  /**
-   * GET /posts/:slug - Get post detail by slug
-   * 
-   * Params: slug (string)
-   * 
-   * Returns: Full post with author, tags, view count
-   * 
-   * Performance:
-   * - Cache-aside pattern with Redis
-   * - Cached for 1 hour
-   * - View count incremented atomically
-   * - Atomic increment happens in background (fire and forget)
-   * 
-   * Filtering:
-   * - Soft-deleted posts excluded for non-ADMIN users
-   * - ADMIN users can access any post for moderation
-   * 
-   * Access Control:
-   * - @Public() - Anyone can view published posts
-   * - Soft-deleted posts hidden from non-ADMIN users
-   */
   @Get(':slug')
   @Public()
   @UseGuards(AtGuard)
@@ -215,41 +152,10 @@ export class PostsController {
     return this.postsService.getPostBySlug(slug, userRole);
   }
 
-  /**
-   * PATCH /posts/:id - Update post
-   * 
-   * Rate Limiting: 20 requests per hour per user
-   * (More lenient than create since updates are less spammy)
-   * 
-   * Params: id (post ID)
-   * Body: UpdatePostDto (partial)
-   * 
-   * Returns: Updated post
-   * 
-   * Authorization:
-   * - @UseGuards(AtGuard) - Must be authenticated
-   * - @UseGuards(OwnershipGuard) - Must own post or be ADMIN
-   * 
-   * Business Logic:
-   * - Sanitizes content_markdown to prevent XSS
-   * - Regenerates slug if title changes using nanoid
-   * - Regenerates embedding if content changes
-   * - Updates tags if provided
-   * - Invalidates both post detail and list caches
-   * 
-   * Atomic Operations:
-   * - Tags update wrapped in transaction
-   * - Old tags deleted, new tags created/connected
-   * 
-   * Security:
-   * - Ownership verified via guard
-   * - Content sanitized for XSS prevention
-   * - Rate limiting to prevent abuse
-   */
   @Patch(':id')
   @HttpCode(HttpStatus.OK)
   @UseGuards(AtGuard, OwnershipGuard)
-  @Throttle({ default: { limit: 20, ttl: 3600 } }) // 20 updates per hour
+  @Throttle({ default: { limit: 20, ttl: 3600 } }) 
   async updatePost(
     @Param('id') id: string,
     @Body() dto: UpdatePostDto,
@@ -258,42 +164,6 @@ export class PostsController {
     return this.postsService.updatePost(Number(id), userId, dto);
   }
 
-  /**
-   * POST /posts/embeddings/backfill - Backfill all embeddings with new 768-dim vectors
-   * 
-   * Admin-only endpoint for dimension migration
-   * 
-   * Use Case:
-   * - Migrate from OpenAI (1536 dims) to Gemini (768 dims)
-   * - Fix pgvector dimension mismatch errors
-   * - Regenerate embeddings after model change
-   * 
-   * Process:
-   * - Fetches all posts
-   * - Generates new 768-dimensional embeddings
-   * - Batch processing with rate limiting
-   * - Returns progress and error details
-   * 
-   * Response:
-   * ```json
-   * {
-   *   "total": 45,
-   *   "processed": 43,
-   *   "failed": 2,
-   *   "errors": [
-   *     { "postId": 5, "error": "API rate limit exceeded" },
-   *     { "postId": 12, "error": "Connection timeout" }
-   *   ]
-   * }
-   * ```
-   * 
-   * Duration: ~6-10 seconds per post (API latency)
-   * - 10 posts: ~1-2 minutes
-   * - 100 posts: ~15-20 minutes
-   * - 1000+ posts: Consider scheduled background job
-   * 
-   * Note: ADMIN only - requires authentication & admin role
-   */
   @Post('embeddings/backfill')
   @HttpCode(HttpStatus.ACCEPTED)
   @UseGuards(AtGuard)
@@ -313,22 +183,6 @@ export class PostsController {
     return this.postsService.backfillEmbeddingsForAllPosts();
   }
 
-  /**
-   * DELETE /posts/:id - Delete post
-   * 
-   * Params: id (post ID)
-   * 
-   * Returns: 204 No Content
-   * 
-   * Authorization:
-   * - @UseGuards(AtGuard) - Must be authenticated
-   * - @UseGuards(OwnershipGuard) - Must own post or be ADMIN
-   * 
-   * Business Logic:
-   * - Cascades delete to posts_tags (Prisma config)
-   * - Clears Redis caches (detail + list)
-   * - Returns 204 No Content
-   */
   @Delete(':id')
   @HttpCode(HttpStatus.NO_CONTENT)
   @UseGuards(AtGuard, OwnershipGuard)
