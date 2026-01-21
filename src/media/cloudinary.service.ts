@@ -10,14 +10,6 @@ export interface UploadResponse {
   mimeType: string;
 }
 
-/**
- * CloudinaryService - Handles image uploads and deletions
- * 
- * Security Note:
- * - All uploads must go through Backend (no client-side uploads)
- * - Secret key NEVER exposed to Frontend
- * - Signed uploads generated server-side only
- */
 @Injectable()
 export class CloudinaryService {
   constructor() {
@@ -28,10 +20,6 @@ export class CloudinaryService {
     });
   }
 
-  /**
-   * Upload image to Cloudinary
-   * Accepts Express Multer file object
-   */
   async uploadImage(
     file: any,
     folder: string = 'devshare',
@@ -77,10 +65,6 @@ export class CloudinaryService {
     });
   }
 
-  /**
-   * Delete image from Cloudinary
-   * Must be called when user deletes a post or removes media
-   */
   async deleteImage(publicId: string): Promise<void> {
     try {
       const result = await cloudinary.uploader.destroy(publicId);
@@ -94,10 +78,6 @@ export class CloudinaryService {
     }
   }
 
-  /**
-   * Generate signed upload signature for advanced use cases
-   * (Frontend can use this signature to upload directly if needed)
-   */
   generateSignature(params: Record<string, any>): {
     signature: string;
     timestamp: number;

@@ -17,14 +17,6 @@ import { User } from '../common/decorators/user.decorator';
 import { PrismaService } from '../prisma/prisma.service';
 import { CloudinaryService } from './cloudinary.service';
 
-/**
- * MediaController - Handle image uploads and management
- * 
- * - Only authenticated users can upload
- * - Images linked to posts if post_id provided
- * - User can only manage their own images
- * - Images cleaned up when post deleted
- */
 @Controller('media')
 export class MediaController {
   constructor(
@@ -32,13 +24,6 @@ export class MediaController {
     private prisma: PrismaService,
   ) {}
 
-  /**
-   * Upload an image
-   * POST /media/upload
-   * 
-   * Query params:
-   * - post_id (optional): Link image to a post
-   */
   @Post('upload')
   @UseGuards(AtGuard)
   @UseInterceptors(FileInterceptor('file'))
@@ -46,26 +31,21 @@ export class MediaController {
     @UploadedFile() file: any,
     @User() user: any,
   ) {
-    // Validation
     if (!file) {
       throw new BadRequestException('No file provided');
     }
 
-    // Only allow image files
     if (!file.mimetype.startsWith('image/')) {
       throw new BadRequestException('File must be an image');
     }
 
-    // Max file size: 10MB
     if (file.size > 10 * 1024 * 1024) {
       throw new BadRequestException('File size exceeds 10MB limit');
     }
 
     try {
-      // Upload to Cloudinary
       const uploadResult = await this.cloudinaryService.uploadImage(file);
 
-      // Save to database
       const mediaAsset = await this.prisma.media_assets.create({
         data: {
           cloudinary_url: uploadResult.url,
@@ -90,10 +70,6 @@ export class MediaController {
     }
   }
 
-  /**
-   * Link an uploaded image to a post
-   * POST /media/:mediaId/link-to-post/:postId
-   */
   @Post(':mediaId/link-to-post/:postId')
   @UseGuards(AtGuard)
   async linkImageToPost(
@@ -101,7 +77,6 @@ export class MediaController {
     @Param('postId', ParseIntPipe) postId: number,
     @User() user: any,
   ) {
-    // Check media ownership
     const media = await this.prisma.media_assets.findUnique({
       where: { id: mediaId },
     });
@@ -114,7 +89,6 @@ export class MediaController {
       throw new ForbiddenException('Cannot manage other users media');
     }
 
-    // Check post ownership
     const post = await this.prisma.posts.findUnique({
       where: { id: postId },
     });
@@ -127,7 +101,6 @@ export class MediaController {
       throw new ForbiddenException('Cannot link to other users posts');
     }
 
-    // Update media
     const updated = await this.prisma.media_assets.update({
       where: { id: mediaId },
       data: { post_id: postId },
@@ -136,13 +109,6 @@ export class MediaController {
     return updated;
   }
 
-  /**
-   * Delete an image
-   * DELETE /media/:mediaId
-   * 
-   * - Only owner can delete
-   * - Removes from Cloudinary and database
-   */
   @Delete(':mediaId')
   @UseGuards(AtGuard)
   async deleteImage(
@@ -162,10 +128,8 @@ export class MediaController {
     }
 
     try {
-      // Delete from Cloudinary
       await this.cloudinaryService.deleteImage(media.public_id);
 
-      // Delete from database
       await this.prisma.media_assets.delete({
         where: { id: mediaId },
       });
@@ -178,10 +142,6 @@ export class MediaController {
     }
   }
 
-  /**
-   * Get user's media library
-   * GET /media/user/library
-   */
   @Post('user/library')
   @UseGuards(AtGuard)
   async getUserMedia(@User() user: any) {
