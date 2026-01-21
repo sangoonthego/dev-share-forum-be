@@ -2,22 +2,6 @@ import { Injectable, Logger } from '@nestjs/common';
 import * as winston from 'winston';
 import * as Sentry from '@sentry/nestjs';
 
-/**
- * LoggerService - Centralized logging with Winston & Sentry integration
- * 
- * Features:
- * - Winston for structured logging with multiple transports
- * - Sentry for error tracking and performance monitoring
- * - Automatic sensitive data masking (passwords, tokens, emails)
- * - Log levels: error, warn, info, http, debug
- * - Separate files for errors and combined logs
- * 
- * Transports:
- * - Console: Pretty-printed logs for development
- * - Error File: Only error level logs
- * - Combined File: All logs for debugging
- * - Sentry: Critical errors for monitoring
- */
 @Injectable()
 export class LoggerService extends Logger {
   private winstonLogger: winston.Logger;
@@ -44,23 +28,20 @@ export class LoggerService extends Logger {
             }),
           ),
         }),
-        // Error file transport
         new winston.transports.File({
           filename: 'logs/error.log',
           level: 'error',
-          maxsize: 5242880, // 5MB
+          maxsize: 5242880,
           maxFiles: 5,
         }),
-        // Combined logs file
         new winston.transports.File({
           filename: 'logs/combined.log',
-          maxsize: 5242880, // 5MB
+          maxsize: 5242880,
           maxFiles: 10,
         }),
       ],
     });
 
-    // Initialize Sentry
     if (process.env.SENTRY_DSN) {
       Sentry.init({
         dsn: process.env.SENTRY_DSN,
@@ -70,10 +51,6 @@ export class LoggerService extends Logger {
     }
   }
 
-  /**
-   * Mask sensitive data in logs
-   * Removes: passwords, tokens, email, credit cards, etc.
-   */
   private maskSensitiveData(data: any): any {
     if (typeof data !== 'object' || data === null) {
       return data;
@@ -148,9 +125,6 @@ export class LoggerService extends Logger {
     super.warn(message);
   }
 
-  /**
-   * Log info
-   */
   log(message: string, context?: string, data?: any) {
     const maskedData = this.maskSensitiveData(data);
 
@@ -162,9 +136,6 @@ export class LoggerService extends Logger {
     super.log(message);
   }
 
-  /**
-   * Log debug info
-   */
   debug(message: string, context?: string, data?: any) {
     const maskedData = this.maskSensitiveData(data);
 
@@ -176,9 +147,6 @@ export class LoggerService extends Logger {
     super.debug(message);
   }
 
-  /**
-   * Log verbose info
-   */
   verbose(message: string, context?: string, data?: any) {
     const maskedData = this.maskSensitiveData(data);
 
@@ -190,9 +158,6 @@ export class LoggerService extends Logger {
     super.verbose(message);
   }
 
-  /**
-   * Log performance metrics (useful for monitoring)
-   */
   logPerformance(
     operation: string,
     duration: number,
@@ -208,9 +173,6 @@ export class LoggerService extends Logger {
     }
   }
 
-  /**
-   * Log security events (for audit trail)
-   */
   logSecurityEvent(event: string, userId?: number, details?: any) {
     const maskedDetails = this.maskSensitiveData(details);
 

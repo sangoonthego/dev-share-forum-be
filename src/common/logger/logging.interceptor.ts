@@ -8,16 +8,6 @@ import { Observable } from 'rxjs';
 import { tap } from 'rxjs/operators';
 import { LoggerService } from './logger.service';
 
-/**
- * LoggingInterceptor - Intercepts all HTTP requests/responses
- * 
- * Features:
- * - Logs all API calls with timing
- * - Masks sensitive request/response data
- * - Captures request parameters, headers (non-sensitive)
- * - Logs response status and timing
- * - Useful for debugging and audit trails
- */
 @Injectable()
 export class LoggingInterceptor implements NestInterceptor {
   constructor(private logger: LoggerService) {}
