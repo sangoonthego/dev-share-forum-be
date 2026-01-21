@@ -3,24 +3,14 @@ import { PrismaService } from '../prisma/prisma.service';
 import { UserActivityType } from '@prisma/client';
 
 export interface ActivityDay {
-  date: string; // YYYY-MM-DD format
+  date: string; 
   count: number;
 }
 
-/**
- * UserActivityService - Contribution tracking (GitHub-style chart)
- * 
- * Logs user actions and provides efficient 365-day activity data
- * Uses indexed (user_id, created_at) for performance with large datasets
- */
 @Injectable()
 export class UserActivityService {
   constructor(private prisma: PrismaService) {}
 
-  /**
-   * Log a user activity
-   * Called when: post created, post updated, comment created
-   */
   async logActivity(
     userId: number,
     activityType: UserActivityType,
@@ -37,16 +27,6 @@ export class UserActivityService {
     });
   }
 
-  /**
-   * Get 365-day activity data for profile
-   * Returns grouped activity counts by date
-   * 
-   * Optimized with:
-   * - Index on (user_id, created_at) for efficient range scan
-   * - Raw SQL grouping for optimal performance
-   * 
-   * Returns array: [{ date: "2025-01-09", count: 5 }, ...]
-   */
   async get365DayActivity(userId: number): Promise<ActivityDay[]> {
     // Query raw activity data from past 365 days
     const activities = await this.prisma.$queryRaw<
@@ -62,17 +42,12 @@ export class UserActivityService {
       ORDER BY DATE(created_at) ASC
     `;
 
-    // Format results as YYYY-MM-DD with proper type conversion
     return activities.map((row: any) => ({
       date: new Date(row.date).toISOString().split('T')[0],
       count: parseInt(row.count, 10),
     }));
   }
 
-  /**
-   * Get activity summary for date range
-   * Useful for weekly/monthly stats
-   */
   async getActivitySummary(
     userId: number,
     startDate: Date,
@@ -100,10 +75,6 @@ export class UserActivityService {
     return { total, byType };
   }
 
-  /**
-   * Get recent activities for a user
-   * Useful for activity feed
-   */
   async getRecentActivities(
     userId: number,
     limit: number = 10,
@@ -114,11 +85,6 @@ export class UserActivityService {
       take: limit,
     });
   }
-
-  /**
-   * Delete activities related to a post or comment
-   * Called when user deletes content
-   */
   async deleteActivitiesByPost(postId: number): Promise<number> {
     const result = await this.prisma.user_activities.deleteMany({
       where: { post_id: postId },

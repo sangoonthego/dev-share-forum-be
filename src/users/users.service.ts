@@ -23,15 +23,6 @@ export interface UserProfileWithActivity {
   activityChart: Array<{ date: string; count: number }>;
 }
 
-/**
- * UsersService - Enhanced user profile and stats
- * 
- * Responsibilities:
- * - Get user profile by username/email
- * - Calculate user stats (posts, comments, karma)
- * - Provide 365-day activity data
- * - Update user profile
- */
 @Injectable()
 export class UsersService {
   constructor(
@@ -39,14 +30,9 @@ export class UsersService {
     private userActivityService: UserActivityService,
   ) {}
 
-  /**
-   * Get complete profile with stats and activity chart
-   * GET /users/:username/profile
-   */
   async getProfileWithActivity(
     username: string,
   ): Promise<UserProfileWithActivity> {
-    // Find user by email (using email as identifier)
     const user = await this.prisma.users.findUnique({
       where: { email: username },
       select: {
@@ -63,9 +49,8 @@ export class UsersService {
       throw new NotFoundException('User not found');
     }
 
-    // Get stats in parallel
     const [postCount, commentCount, activityChart] = await Promise.all([
-      // Count published posts
+
       this.prisma.posts.count({
         where: {
           author_id: user.id,
@@ -73,14 +58,12 @@ export class UsersService {
           status: 'PUBLISHED',
         },
       }),
-      // Count comments (not deleted)
       this.prisma.comments.count({
         where: {
           author_id: user.id,
           deleted_at: null,
         },
       }),
-      // Get 365-day activity
       this.userActivityService.get365DayActivity(user.id),
     ]);
 
@@ -100,9 +83,6 @@ export class UsersService {
     };
   }
 
-  /**
-   * Get user profile by ID (internal use)
-   */
   async getUserById(userId: number) {
     const user = await this.prisma.users.findUnique({
       where: { id: userId },
@@ -126,9 +106,6 @@ export class UsersService {
     return user;
   }
 
-  /**
-   * Update user profile
-   */
   async updateProfile(
     userId: number,
     data: {
@@ -156,9 +133,6 @@ export class UsersService {
     return user;
   }
 
-  /**
-   * Add karma to user (for upvotes, achievements, etc.)
-   */
   async addKarma(userId: number, points: number): Promise<number> {
     const user = await this.prisma.users.update({
       where: { id: userId },
@@ -169,9 +143,6 @@ export class UsersService {
     return user.karma;
   }
 
-  /**
-   * Check if user exists by email
-   */
   async userExists(email: string): Promise<boolean> {
     const user = await this.prisma.users.findUnique({
       where: { email },
