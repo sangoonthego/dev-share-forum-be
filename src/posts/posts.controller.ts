@@ -51,29 +51,6 @@ import type { JwtPayload } from 'src/auth/dto/auth.dto';
 export class PostsController {
   constructor(private postsService: PostsService) {}
 
-  /**
-   * POST /posts - Create new post
-   * 
-   * Rate Limiting: 10 requests per hour per user
-   * (Prevents spam/automated abuse)
-   * 
-   * Requires: Authentication (JWT)
-   * Body: CreatePostDto
-   * 
-   * Returns: Created post with ID, slug, tags
-   * 
-   * Business Logic:
-   * - Sanitizes content_markdown to prevent XSS
-   * - Atomic creation with tags (find or create)
-   * - Generates unique slug from title using nanoid
-   * - Creates mock AI embedding
-   * - Invalidates pagination caches
-   * 
-   * Security:
-   * - XSS prevention via sanitization
-   * - Rate limiting to prevent spam
-   * - Authentication required
-   */
   @Post()
   @HttpCode(HttpStatus.CREATED)
   @UseGuards(AtGuard)
@@ -85,31 +62,6 @@ export class PostsController {
     return this.postsService.createPost(userId, dto);
   }
 
-  /**
-   * GET /posts - List posts with pagination
-   * 
-   * Query params:
-   * - page: number (default: 1)
-   * - limit: number (default: 10, max: 50)
-   * - all: boolean (show unpublished if authenticated)
-   * 
-   * Returns: Paginated posts with total count
-   * 
-   * Caching:
-   * - Cached for 5 minutes (300s)
-   * - Cache key includes page, limit, published status, user role
-   * - Invalidated on create/update/delete
-   * 
-   * Filtering:
-   * - Soft-deleted posts excluded for non-ADMIN users
-   * - Only published posts shown to public by default
-   * - Authenticated users can request unpublished if owner
-   * 
-   * Access Control:
-   * - @Public() - Anyone can access
-   * - Shows only published posts by default
-   * - Authenticated users can request unpublished if owner
-   */
   @Get()
   @Public()
   @UseGuards(AtGuard) // Soft guard - @Public() bypasses it
