@@ -34,17 +34,6 @@ const redisProvider: Provider = {
   },
 };
 
-/**
- * Redis Module - Global Redis configuration
- * 
- * Handles:
- * - JWT Blacklisting (jti storage)
- * - Refresh Token Storage (replacing PostgreSQL)
- * - Session Management
- * - Rate Limiting Counters
- * 
- * Connection pooling and reconnection handled by ioredis
- */
 @Global()
 @Module({
   providers: [redisProvider, RedisService],
