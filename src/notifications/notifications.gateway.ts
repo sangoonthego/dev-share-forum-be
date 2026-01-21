@@ -14,52 +14,12 @@ import { JwtService } from '@nestjs/jwt';
 import { NotificationsService } from './notifications.service';
 import { WebSocketNotificationDto } from './dto/notification.dto';
 
-/**
- * **NotificationsGateway - Real-time WebSocket Implementation**
- *
- * **Architecture:**
- * - Uses Socket.IO for WebSocket with fallback support
- * - JWT authentication via socket handshake (custom middleware)
- * - Connected users mapped: userId → Socket ID
- * - Each user can have multiple sockets (mobile + web)
- *
- * **Authentication Flow:**
- * 1. Client connects with `Authorization` header: `Bearer <token>`
- * 2. Server decodes JWT and extracts userId
- * 3. Socket joined to room: `user:{userId}`
- * 4. Server can emit to room for all user devices
- *
- * **Real-time Delivery:**
- * - User online: Instant WebSocket push
- * - User offline: Notification saved in DB (pulled on reconnect)
- *
- * **Events:**
- * - `notification` (SERVER→CLIENT): New notification pushed
- * - `notification:read` (CLIENT→SERVER): User marks as read
- * - `notification:read:all` (CLIENT→SERVER): Mark all as read
- *
- * **Example Client Code:**
- * ```typescript
- * const socket = io('http://localhost:3000', {
- *   auth: {
- *     token: localStorage.getItem('access_token'),
- *   },
- * });
- *
- * socket.on('notification', (notif: WebSocketNotificationDto) => {
- *   console.log('New notification:', notif.title);
- *   showBadge(notif.id);
- * });
- *
- * socket.emit('notification:read', { notificationId: 123 });
- * ```
- */
 @WebSocketGateway({
   cors: {
-    origin: '*', // Configure based on frontend domain in production
+    origin: '*', 
     credentials: true,
   },
-  namespace: '/notifications', // Separate namespace to avoid conflicts
+  namespace: '/notifications', 
 })
 @Injectable()
 export class NotificationsGateway
@@ -76,15 +36,6 @@ export class NotificationsGateway
     private notificationsService: NotificationsService,
   ) {}
 
-  /**
-   * Initialize gateway with JWT authentication middleware
-   *
-   * Workflow:
-   * 1. Register authentication middleware
-   * 2. Decode JWT from handshake headers
-   * 3. Add userId to socket data
-   * 4. Allow or reject connection
-   */
   afterInit(server: Server) {
     // Authentication middleware
     server.use((socket: Socket, next: any) => {
@@ -97,12 +48,10 @@ export class NotificationsGateway
           );
         }
 
-        // Decode JWT
         const payload = this.jwtService.verify(token, {
           secret: process.env.JWT_AT_SECRET || 'access_token_secret',
         });
 
-        // Attach user info to socket
         (socket as any).userId = payload.sub;
         (socket as any).email = payload.email;
 
@@ -124,17 +73,6 @@ export class NotificationsGateway
     this.logger.log('[Gateway] NotificationsGateway initialized');
   }
 
-  /**
-   * Handle new WebSocket connection
-   *
-   * Workflow:
-   * 1. Extract userId from socket
-   * 2. Add socket to user's set
-   * 3. Join Socket.IO room: `user:{userId}`
-   * 4. Log connection
-   *
-   * **Note:** Multiple sockets per user are supported (mobile + web)
-   */
   handleConnection(socket: Socket) {
     const userId = (socket as any).userId;
     const email = (socket as any).email;
@@ -145,7 +83,6 @@ export class NotificationsGateway
       return;
     }
 
-    // Track connected user
     if (!this.connectedUsers.has(userId)) {
       this.connectedUsers.set(userId, new Set());
     }
@@ -154,7 +91,6 @@ export class NotificationsGateway
       userSockets.add(socket.id);
     }
 
-    // Join room for user-specific broadcasts
     socket.join(`user:${userId}`);
 
     const socketCount = this.connectedUsers.get(userId)?.size || 0;
@@ -164,12 +100,6 @@ export class NotificationsGateway
     );
   }
 
-  /**
-   * Handle WebSocket disconnection
-   *
-   * Cleanup: Remove socket from user's set
-   * If user has no more sockets, remove from tracking
-   */
   handleDisconnect(socket: Socket) {
     const userId = (socket as any).userId;
 
@@ -189,25 +119,6 @@ export class NotificationsGateway
     );
   }
 
-  /**
-   * Push notification to online user(s)
-   *
-   * Used by: CommentsService after creating notification
-   *
-   * Sends to: All sockets in `user:{userId}` room (all user devices)
-   * Format: WebSocketNotificationDto with auto-added timestamp
-   *
-   * **Workflow:**
-   * 1. Ensure null-safety: convert undefined to null
-   * 2. Add timestamp from Date.now()
-   * 3. Emit to user's room (all devices)
-   * 4. Log delivery status
-   *
-   * **Note:** If user offline, notification already saved in DB
-   *
-   * @param userId - Target user ID
-   * @param notification - Notification to push (timestamp will be auto-added)
-   */
   async pushNotificationToUser(
     userId: number,
     notification: WebSocketNotificationDto,
@@ -232,15 +143,6 @@ export class NotificationsGateway
     );
   }
 
-  /**
-   * CLIENT EVENT: User marks notification as read
-   *
-   * Workflow:
-   * 1. Extract userId from socket
-   * 2. Call service to update database
-   * 3. Broadcast update to user's sockets (optional)
-   * 4. Send confirmation to client
-   */
   @SubscribeMessage('notification:read')
   async handleNotificationRead(
     @ConnectedSocket() socket: Socket,
@@ -254,12 +156,10 @@ export class NotificationsGateway
         userId,
       );
 
-      // Broadcast update to user's other sockets
       socket.to(`user:${userId}`).emit('notification:read:updated', {
         notificationId: data.notificationId,
       });
 
-      // Send confirmation back to client
       socket.emit('notification:read:success', {
         notificationId: data.notificationId,
       });
@@ -275,15 +175,6 @@ export class NotificationsGateway
     }
   }
 
-  /**
-   * CLIENT EVENT: User marks all notifications as read
-   *
-   * Workflow:
-   * 1. Extract userId
-   * 2. Update all in database
-   * 3. Broadcast to user's devices
-   * 4. Send confirmation
-   */
   @SubscribeMessage('notification:read:all')
   async handleMarkAllAsRead(
     @ConnectedSocket() socket: Socket,
@@ -293,12 +184,10 @@ export class NotificationsGateway
     try {
       const count = await this.notificationsService.markAllAsRead(userId);
 
-      // Broadcast to user's other sockets
       socket.to(`user:${userId}`).emit('notification:all:read', {
         count,
       });
 
-      // Send confirmation
       socket.emit('notification:all:read:success', { count });
 
       this.logger.debug(
@@ -311,11 +200,6 @@ export class NotificationsGateway
     }
   }
 
-  /**
-   * CLIENT EVENT: Request unread count (e.g., for notification badge)
-   *
-   * Lightweight query for quick badge updates
-   */
   @SubscribeMessage('notification:unread-count')
   async handleUnreadCount(
     @ConnectedSocket() socket: Socket,
@@ -333,14 +217,6 @@ export class NotificationsGateway
     }
   }
 
-  /**
-   * Helper: Emit notification to user
-   *
-   * Internal API for CommentsService to trigger real-time push
-   *
-   * @param userId - Target user
-   * @param notification - Notification data
-   */
   async notifyUser(
     userId: number,
     notification: WebSocketNotificationDto,
@@ -348,22 +224,10 @@ export class NotificationsGateway
     await this.pushNotificationToUser(userId, notification);
   }
 
-  /**
-   * Helper: Check if user is online
-   *
-   * @param userId - User to check
-   * @returns True if user has active sockets
-   */
   isUserOnline(userId: number): boolean {
     return this.connectedUsers.has(userId);
   }
 
-  /**
-   * Helper: Get active socket count for user
-   *
-   * @param userId - User ID
-   * @returns Number of connected sockets
-   */
   getSocketCountForUser(userId: number): number {
     return this.connectedUsers.get(userId)?.size || 0;
   }
