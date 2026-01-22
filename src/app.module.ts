@@ -9,6 +9,8 @@ import { CommentsModule } from './comments/comments.module';
 import { NotificationsModule } from './notifications/notifications.module';
 import { MediaModule } from './media/media.module';
 import { UsersModule } from './users/users.module';
+import { QueueModule } from './queues/queue.module';
+import { AiModule } from './ai/ai.module';
 
 @Module({
   imports: [
@@ -20,6 +22,8 @@ import { UsersModule } from './users/users.module';
     NotificationsModule,
     MediaModule,
     UsersModule,
+    QueueModule,
+    AiModule,
   ],
   controllers: [AppController],
   providers: [AppService],
