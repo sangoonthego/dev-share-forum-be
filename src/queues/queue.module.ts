@@ -4,8 +4,10 @@ import { QueueService } from './queue.service';
 import { EmailProcessor } from './processors/email.processor';
 import { EmbeddingProcessor } from './processors/embedding.processor';
 import { ViewCountProcessor } from './processors/view-count.processor';
+import { PostProcessorWorker } from './processors/ai-post-processor.worker';
 import { PrismaModule } from 'src/prisma/prisma.module';
 import { LoggerModule } from 'src/common/logger/logger.module';
+import { AiModule } from 'src/ai/ai.module';
 
 /**
  * QueueModule - BullMQ integration for background job processing
@@ -14,6 +16,7 @@ import { LoggerModule } from 'src/common/logger/logger.module';
  * - email: Email notifications (send emails, notifications)
  * - embedding: AI embedding generation for semantic search
  * - viewCount: View count updates (batched for performance)
+ * - aiProcessor: AI tasks (embedding, moderation, tagging)
  * 
  * Benefits:
  * - Decouples heavy tasks from request/response cycle
@@ -57,11 +60,24 @@ import { LoggerModule } from 'src/common/logger/logger.module';
           removeOnFail: true, // Less critical, can discard failed jobs
         },
       },
+      {
+        name: 'aiProcessor',
+        defaultJobOptions: {
+          attempts: 3,
+          backoff: {
+            type: 'exponential',
+            delay: 2000, // Start at 2 seconds
+          },
+          removeOnComplete: true,
+          removeOnFail: false,
+        },
+      },
     ),
     PrismaModule,
     LoggerModule,
+    AiModule,
   ],
-  providers: [QueueService, EmailProcessor, EmbeddingProcessor, ViewCountProcessor],
+  providers: [QueueService, EmailProcessor, EmbeddingProcessor, ViewCountProcessor, PostProcessorWorker],
   exports: [QueueService],
 })
 export class QueueModule {}
