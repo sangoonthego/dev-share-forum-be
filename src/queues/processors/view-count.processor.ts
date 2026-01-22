@@ -5,14 +5,6 @@ import { LoggerService } from 'src/common/logger/logger.service';
 import { PrismaService } from 'src/prisma/prisma.service';
 import { ViewCountJobData } from '../queue.service';
 
-/**
- * ViewCountProcessor - Handles post view count updates
- * 
- * Processes:
- * - Increments post view counts
- * - Can batch multiple increments if needed
- * - Non-critical (can fail without affecting user experience)
- */
 @Processor('viewCount')
 @Injectable()
 export class ViewCountProcessor {
@@ -58,8 +50,6 @@ export class ViewCountProcessor {
         'VIEWCOUNT_PROCESSOR',
       );
 
-      // Don't throw - view count is non-critical
-      // Job will be removed on failure by queue config
       return {
         success: false,
         slug,
@@ -79,7 +69,6 @@ export class ViewCountProcessor {
 
   @OnQueueFailed()
   onViewCountJobFailed(job: Job, error: Error) {
-    // Log but don't escalate - view count is non-critical
     this.logger.debug(
       `View count job failed: ${job.id}`,
       'VIEWCOUNT_PROCESSOR',

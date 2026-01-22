@@ -4,15 +4,6 @@ import { Injectable } from '@nestjs/common';
 import { LoggerService } from 'src/common/logger/logger.service';
 import { EmailJobData } from '../queue.service';
 
-/**
- * EmailProcessor - Handles email sending jobs
- * 
- * Processes:
- * - User notifications
- * - Password reset emails
- * - Email verification
- * - Notification digests
- */
 @Processor('email')
 @Injectable()
 export class EmailProcessor {
@@ -28,8 +19,6 @@ export class EmailProcessor {
         'EMAIL_PROCESSOR',
       );
 
-      // TODO: Integrate with actual email service (SendGrid, Mailgun, etc.)
-      // This is a placeholder implementation
       await this.sendEmailViaProvider(email, subject, template, variables);
 
       this.logger.log(
@@ -50,27 +39,19 @@ export class EmailProcessor {
         'EMAIL_PROCESSOR',
       );
 
-      // Throw to trigger retry (BullMQ will retry up to 3 times)
       throw error;
     }
   }
 
-  /**
-   * Send email via provider (placeholder)
-   * Replace with actual implementation (SendGrid, Mailgun, etc.)
-   */
   private async sendEmailViaProvider(
     email: string,
     subject: string,
     template: string,
     variables?: Record<string, any>,
   ): Promise<void> {
-    // Placeholder: In production, integrate with email service
-    // Example: await sendgridClient.send({ to: email, subject, ... })
     console.log(`[EMAIL] Sending to ${email}: ${subject}`);
     console.log(`[EMAIL] Template: ${template}, Variables:`, variables);
 
-    // Simulate email sending delay
     await new Promise((resolve) => setTimeout(resolve, 100));
   }
 
@@ -87,7 +68,6 @@ export class EmailProcessor {
       'EMAIL_PROCESSOR',
     );
 
-    // Log security event if it's an important notification
     if (job.data.template === 'password-reset') {
       this.logger.logSecurityEvent(
         'Password reset email failed to send',

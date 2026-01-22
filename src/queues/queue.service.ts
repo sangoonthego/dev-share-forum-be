@@ -22,32 +22,23 @@ export interface ViewCountJobData {
   increment?: number;
 }
 
-/**
- * QueueService - Background job management using BullMQ + Redis
- * 
- * Responsibilities:
- * - Add jobs to queues
- * - Track job status
- * - Provide statistics
- * 
- * Architecture:
- * - Email queue: High priority for user notifications
- * - Embedding queue: Medium priority for AI processing
- * - View count queue: Low priority, can be batch processed
- */
+export interface AiProcessorJobData {
+  postId: number;
+  title: string;
+  content: string;
+  authorId: number;
+}
+
 @Injectable()
 export class QueueService {
   constructor(
     @InjectQueue('email') private emailQueue: Queue<EmailJobData>,
     @InjectQueue('embedding') private embeddingQueue: Queue<EmbeddingJobData>,
     @InjectQueue('viewCount') private viewCountQueue: Queue<ViewCountJobData>,
+    @InjectQueue('aiProcessor') private aiProcessorQueue: Queue<AiProcessorJobData>,
     private logger: LoggerService,
   ) {}
 
-  /**
-   * Add email job to queue
-   * Used for: User notifications, password reset, email verification
-   */
   async queueEmail(data: EmailJobData): Promise<Job<EmailJobData>> {
     try {
       const job = await this.emailQueue.add(data, {
@@ -63,15 +54,21 @@ export class QueueService {
     }
   }
 
-  /**
-   * Add embedding job to queue
-   * Used for: Post creation, post updates, batch processing
-   */
   async queueEmbedding(data: EmbeddingJobData): Promise<Job<EmbeddingJobData>> {
     try {
+      // CRITICAL FIX: Add retry strategy for embedding failures
+      // Prevents "ghost posts" (published but invisible to semantic search)
       const job = await this.embeddingQueue.add(data, {
         priority: 5,
         jobId: `embedding-${data.postId}-${Date.now()}`,
+        // ADDED: Retry configuration with exponential backoff
+        attempts: 3, // Retry up to 3 times
+        backoff: {
+          type: 'exponential',
+          delay: 2000, // Start with 2s delay, then 4s, 8s
+        },
+        removeOnComplete: true, // Clean up successful jobs
+        removeOnFail: false, // Keep failed jobs for debugging
       });
 
       this.logger.debug(`Embedding job queued: ${job.id}`, 'QUEUE');
@@ -82,10 +79,6 @@ export class QueueService {
     }
   }
 
-  /**
-   * Add view count increment job to queue
-   * Used for: Post view tracking (batched for performance)
-   */
   async queueViewCountIncrement(slug: string): Promise<Job<ViewCountJobData>> {
     try {
       const job = await this.viewCountQueue.add(
@@ -104,21 +97,35 @@ export class QueueService {
     }
   }
 
-  /**
-   * Get queue statistics for monitoring
-   */
+  async queueAiProcessor(data: AiProcessorJobData): Promise<Job<AiProcessorJobData>> {
+    try {
+      const job = await this.aiProcessorQueue.add('processPublishedPost', data, {
+        priority: 7,
+        jobId: `ai-${data.postId}-${Date.now()}`,
+      });
+
+      this.logger.debug(`AI processor job queued: ${job.id}`, 'QUEUE');
+      return job;
+    } catch (error) {
+      this.logger.error('Failed to queue AI processor job', error, 'QUEUE');
+      throw error;
+    }
+  }
+
   async getQueueStats() {
     try {
-      const [emailStats, embeddingStats, viewCountStats] = await Promise.all([
+      const [emailStats, embeddingStats, viewCountStats, aiProcessorStats] = await Promise.all([
         this.emailQueue.getJobCounts(),
         this.embeddingQueue.getJobCounts(),
         this.viewCountQueue.getJobCounts(),
+        this.aiProcessorQueue.getJobCounts(),
       ]);
 
       return {
         email: emailStats,
         embedding: embeddingStats,
         viewCount: viewCountStats,
+        aiProcessor: aiProcessorStats,
       };
     } catch (error) {
       this.logger.error('Failed to get queue stats', error, 'QUEUE');
@@ -126,9 +133,6 @@ export class QueueService {
     }
   }
 
-  /**
-   * Get job status
-   */
   async getJobStatus(queueName: string, jobId: string) {
     try {
       const queue =
@@ -136,7 +140,9 @@ export class QueueService {
           ? this.emailQueue
           : queueName === 'embedding'
             ? this.embeddingQueue
-            : this.viewCountQueue;
+            : queueName === 'viewCount'
+              ? this.viewCountQueue
+              : this.aiProcessorQueue;
 
       const job = await queue.getJob(jobId);
       if (!job) return null;
@@ -154,9 +160,6 @@ export class QueueService {
     }
   }
 
-  /**
-   * Clear all jobs from a queue (use with caution)
-   */
   async clearQueue(queueName: string): Promise<void> {
     try {
       const queue =
@@ -164,7 +167,9 @@ export class QueueService {
           ? this.emailQueue
           : queueName === 'embedding'
             ? this.embeddingQueue
-            : this.viewCountQueue;
+            : queueName === 'viewCount'
+              ? this.viewCountQueue
+              : this.aiProcessorQueue;
 
       await queue.clean(0, 'failed');
       await queue.empty();
@@ -176,3 +181,4 @@ export class QueueService {
     }
   }
 }
+
