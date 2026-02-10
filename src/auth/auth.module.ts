@@ -13,6 +13,15 @@ import { AtStrategy } from './strategies/at.strategy';
 import { RtStrategy } from './strategies/rt.strategy';
 import { GoogleStrategy } from './strategies/google.strategy';
 import { GitHubStrategy } from './strategies/github.strategy';
+import { LoggerService } from 'src/common/logger/logger.service';
+
+const oauthStrategies: any[] = [];
+if (process.env.GOOGLE_CLIENT_ID && process.env.GOOGLE_CLIENT_SECRET) {
+  oauthStrategies.push(GoogleStrategy);
+}
+if (process.env.GITHUB_CLIENT_ID && process.env.GITHUB_CLIENT_SECRET) {
+  oauthStrategies.push(GitHubStrategy);
+}
 
 @Module({
   imports: [
@@ -30,8 +39,8 @@ import { GitHubStrategy } from './strategies/github.strategy';
     ChangePasswordService,
     AtStrategy, 
     RtStrategy,
-    GoogleStrategy, 
-    GitHubStrategy,
+    LoggerService,
+    ...oauthStrategies,
   ],
   exports: [UserService, LoginAuditService], 
 })

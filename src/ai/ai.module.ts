@@ -1,7 +1,7 @@
 import { Module } from '@nestjs/common';
-import { GeminiService } from './gateway/services/gemini.service';
-import { AiEmbeddingService } from './gateway/services/ai-embedding.service';
-import { AiAgentService } from './gateway/services/ai-agent.service';
+import { GeminiService } from './services/gemini.service';
+import { AiEmbeddingService } from './services/ai-embedding.service';
+import { AiAgentService } from './services/ai-agent.service';
 import { AiChatGateway } from './gateway/ai-chat.gateway';
 import { AiController } from './ai.controller';
 import { PrismaModule } from 'src/prisma/prisma.module';
