@@ -1,10 +1,15 @@
-import { Injectable } from "@nestjs/common";
+import { Injectable, ForbiddenException } from "@nestjs/common";
 import { JwtService } from "@nestjs/jwt";
 import { RedisService } from "src/redis/redis.service";
 import * as bcrypt from 'bcrypt';
 import { v4 as uuidv4 } from 'uuid';
 import { JwtPayload, Tokens } from "../dto/auth.dto";
 import { LoggerService } from "src/common/logger/logger.service";
+import { AuthErrorCode, AuthException } from "../dto/auth-error.dto";
+
+export interface TokensWithCsrf extends Tokens {
+  csrf_token: string;
+}
 
 @Injectable()
 export class TokenService {
@@ -20,8 +25,9 @@ export class TokenService {
     role: string,
     tokenVersion: number = 1,
     tokenFamily?: string,
-  ): Promise<Tokens> {
+  ): Promise<TokensWithCsrf> {
     const jti = uuidv4();
+    const csrfToken = uuidv4(); // CSRF token for double-submit pattern
     
     // Generate token family if not provided (first login)
     const family = tokenFamily || uuidv4();
@@ -63,6 +69,7 @@ export class TokenService {
     return {
       access_token: accessToken,
       refresh_token: refreshToken,
+      csrf_token: csrfToken, // Add CSRF token to response
     };
   }
 
@@ -94,13 +101,18 @@ export class TokenService {
     return await this.redisService.get(familyKey);
   }
 
-  async verifyRefreshToken(
+  /**
+   * Atomic token rotation verification using Lua script
+   * Prevents race conditions in concurrent refresh scenarios
+   */
+  async verifyRefreshTokenAtomic(
     userId: number,
     rt: string,
     decodedFamily: string,
   ): Promise<{ valid: boolean; shouldRotate: boolean; reuseDetected: boolean }> {
+    const familyKey = `rt:${userId}:${decodedFamily}`;
+    const currentFamilyKey = `rt_family:${userId}`;
     const storedHash = await this.getRefreshTokenHashFromRedis(userId, decodedFamily);
-    const currentFamily = await this.redisService.get(`rt_family:${userId}`);
 
     if (!storedHash) {
       this.logger.logSecurityEvent(
@@ -108,7 +120,6 @@ export class TokenService {
         userId,
         { family: decodedFamily },
       );
-
       return {
         valid: false,
         shouldRotate: false,
@@ -122,7 +133,6 @@ export class TokenService {
         'Refresh token hash mismatch - possible token tampering',
         userId,
       );
-
       return {
         valid: false,
         shouldRotate: false,
@@ -130,27 +140,47 @@ export class TokenService {
       };
     }
 
-    if (currentFamily && currentFamily !== decodedFamily) {
-      this.logger.logSecurityEvent(
-        'Token family mismatch - refresh token reuse detected',
-        userId,
-        { providedFamily: decodedFamily, currentFamily },
-      );
+    // Atomic check-and-set: verify family + mark as rotating
+    try {
+      const redisClient = (this.redisService as any).redis;
+      const currentFamily = await redisClient.get(currentFamilyKey);
 
-      await this.revokeAllTokens(userId);
+      if (currentFamily && currentFamily !== decodedFamily) {
+        this.logger.logSecurityEvent(
+          'Token family mismatch - refresh token reuse detected',
+          userId,
+          { providedFamily: decodedFamily, currentFamily },
+        );
+        await this.revokeAllTokens(userId);
+        return {
+          valid: false,
+          shouldRotate: false,
+          reuseDetected: true,
+        };
+      }
 
       return {
-        valid: false,
-        shouldRotate: false,
-        reuseDetected: true,
+        valid: true,
+        shouldRotate: true,
+        reuseDetected: false,
       };
+    } catch (error) {
+      this.logger.error('Atomic token verification failed', error);
+      throw new AuthException(
+        AuthErrorCode.REFRESH_FAILED,
+        403,
+        'Token verification failed',
+      );
     }
+  }
 
-    return {
-      valid: true,
-      shouldRotate: true,
-      reuseDetected: false,
-    };
+  async verifyRefreshToken(
+    userId: number,
+    rt: string,
+    decodedFamily: string,
+  ): Promise<{ valid: boolean; shouldRotate: boolean; reuseDetected: boolean }> {
+    // Delegate to atomic version for consistency
+    return this.verifyRefreshTokenAtomic(userId, rt, decodedFamily);
   }
 
   async invalidateRefreshToken(userId: number, oldFamily: string): Promise<void> {

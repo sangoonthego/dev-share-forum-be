@@ -124,7 +124,7 @@ export class AuthService {
         `[OAuth] Generated tokens for user #${user.id} (${oauthProfile.provider})`,
       );
 
-      // set cookies
+      // return tokens with CSRF token for frontend
       return {
         id: user.id,
         email: user.email,
@@ -132,6 +132,7 @@ export class AuthService {
         profile_avatar: user.profile_avatar,
         access_token: tokens.access_token,
         refresh_token: tokens.refresh_token,
+        csrf_token: tokens.csrf_token,
       };
     } catch (error) {
       this.logger.error(
