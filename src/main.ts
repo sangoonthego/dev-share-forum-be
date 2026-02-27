@@ -3,12 +3,29 @@ import { AppModule } from './app.module';
 import { ValidationPipe, Logger } from '@nestjs/common';
 import { Reflector } from '@nestjs/core';
 import cookieParser from 'cookie-parser';
+import * as Sentry from '@sentry/nestjs';
 import { GlobalExceptionFilter } from './common/filters/http-exception.filter';
 import { AtGuard } from './common/guards/at.guard';
 
 async function bootstrap() {
+  // Initialize Sentry for error tracking & distributed tracing
+  if (process.env.SENTRY_DSN) {
+    Sentry.init({
+      dsn: process.env.SENTRY_DSN,
+      integrations: [
+        Sentry.captureConsoleIntegration(),
+        Sentry.onUncaughtExceptionIntegration(),
+        Sentry.onUnhandledRejectionIntegration(),
+      ],
+      // Trace sampling
+      tracesSampleRate: process.env.NODE_ENV === 'production' ? 0.1 : 1.0,
+      environment: process.env.NODE_ENV,
+    });
+  }
+
   const logger = new Logger('Bootstrap');
   const app = await NestFactory.create(AppModule);
+
   app.setGlobalPrefix('api/v1');
 
   app.use(cookieParser());
@@ -17,13 +34,13 @@ async function bootstrap() {
 
   app.useGlobalPipes(
     new ValidationPipe({
-      whitelist: true, // Remove unvalidated properties
-      forbidNonWhitelisted: true, // Throw error if extra fields
-      transform: true, // Auto convert types (string -> number)
+      whitelist: true,
+      forbidNonWhitelisted: true,
+      transform: true,
       transformOptions: {
         enableImplicitConversion: true,
       },
-      stopAtFirstError: false, // Return all validation errors
+      stopAtFirstError: false,
     }),
   );
 
@@ -32,30 +49,21 @@ async function bootstrap() {
 
   app.enableCors({
     origin: process.env.FRONTEND_URL || 'http://localhost:3001',
-    credentials: true, // Allow cookies/auth headers
+    credentials: true,
     methods: ['GET', 'POST', 'PUT', 'DELETE', 'PATCH', 'OPTIONS'],
-    allowedHeaders: ['Content-Type', 'Authorization', 'Accept'],
+    allowedHeaders: ['Content-Type', 'Authorization', 'Accept', 'X-CSRF-Token', 'X-Trace-ID'],
   });
 
   app.use((req, res, next) => {
-    // Prevent clickjacking
+    // Security headers
     res.setHeader('X-Frame-Options', 'DENY');
-
-    // Prevent MIME type sniffing
     res.setHeader('X-Content-Type-Options', 'nosniff');
-
-    // Enable XSS protection in older browsers
     res.setHeader('X-XSS-Protection', '1; mode=block');
-
-    // Content Security Policy (basic)
     res.setHeader(
       'Content-Security-Policy',
       "default-src 'self'; script-src 'self'; style-src 'self' 'unsafe-inline'",
     );
-
-    // Remove Server header to prevent fingerprinting
     res.removeHeader('Server');
-
     next();
   });
 
@@ -65,10 +73,10 @@ async function bootstrap() {
   logger.log(`━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━`);
   logger.log(`DevShare Lite API`);
   logger.log(`http://localhost:${port}`);
-  logger.log(`Security: Enabled (CORS, CSRF, Headers)`);
-  logger.log(`Auth: JWT + Redis Blacklist + Global AtGuard`);
-  logger.log(`Storage: Redis (RT) + PostgreSQL (User Data)`);
-  logger.log(`Posts: Atomic Creation, Caching, Ownership Verification`);
+  logger.log(`Security: Enabled (CORS, CSRF, Headers, Rate Limiting)`);
+  logger.log(`Auth: JWT + Family Rotation + Redis Blacklist`);
+  logger.log(`Storage: Redis (RT + Tokens) + PostgreSQL (Users)`);
+  logger.log(`Tracing: Sentry (${process.env.SENTRY_DSN ? 'Enabled' : 'Disabled'})`);
   logger.log(`━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━`);
 }
 
