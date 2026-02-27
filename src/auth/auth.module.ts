@@ -9,6 +9,7 @@ import { RegisterService } from './services/register.service';
 import { UserService } from './services/user.service';
 import { LoginAuditService } from './services/login-audit.service';
 import { ChangePasswordService } from './services/change-password.service';
+import { CsrfService } from './services/csrf.service';
 import { AtStrategy } from './strategies/at.strategy';
 import { RtStrategy } from './strategies/rt.strategy';
 import { GoogleStrategy } from './strategies/google.strategy';
@@ -37,6 +38,7 @@ if (process.env.GITHUB_CLIENT_ID && process.env.GITHUB_CLIENT_SECRET) {
     UserService,
     LoginAuditService,
     ChangePasswordService,
+    CsrfService,
     AtStrategy, 
     RtStrategy,
     LoggerService,
