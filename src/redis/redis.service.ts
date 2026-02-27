@@ -255,5 +255,18 @@ export class RedisService {
 
     return value;
   }
+
+  // Public methods for rate limiting and counters
+  async incr(key: string): Promise<number> {
+    return await this.redis.incr(key);
+  }
+
+  async expire(key: string, seconds: number): Promise<void> {
+    await this.redis.expire(key, seconds);
+  }
+
+  async ttl(key: string): Promise<number> {
+    return await this.redis.ttl(key);
+  }
 }
 
