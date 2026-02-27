@@ -11,17 +11,23 @@ export class GitHubStrategy extends PassportStrategy(Strategy, 'github') {
       clientID: process.env.GITHUB_CLIENT_ID,
       clientSecret: process.env.GITHUB_CLIENT_SECRET,
       callbackURL: process.env.GITHUB_CALLBACK_URL,
-      scope: ['user:email'], // Request email scope
+      scope: ['user:email'],
+      state: true, // Enable state parameter for CSRF protection
+      passReqToCallback: true, // Get request for state validation
     });
   }
 
   async validate(
+    req: any, // request included due to passReqToCallback
     accessToken: string,
     refreshToken: string | undefined,
     profile: any,
     done: VerifyCallback,
   ): Promise<void> {
     try {
+      // Passport automatically validates state parameter
+      // If state is invalid, this method won't be called
+
       // Extract profile data from GitHub
       const { id: githubId, username, displayName, emails, photos } = profile;
 
@@ -60,3 +66,4 @@ export class GitHubStrategy extends PassportStrategy(Strategy, 'github') {
     }
   }
 }
+  
