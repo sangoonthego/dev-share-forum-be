@@ -12,6 +12,7 @@ export class JwtPayload {
 export interface Tokens {
     access_token: string;
     refresh_token: string;
+    csrf_token: string;
 }
 
 export class RegisterDto {
@@ -78,6 +79,7 @@ export class UserProfileResponse {
 
 export class AuthResponse {
     access_token: string;
+    csrf_token?: string; // Optional CSRF token for frontend
 }
 
 export interface OAuthProfile {
@@ -100,4 +102,5 @@ export interface OAuthUserResponse {
     // Include tokens for frontend to store
     access_token: string;
     refresh_token: string;
+    csrf_token: string; // CSRF token for frontend
 }
