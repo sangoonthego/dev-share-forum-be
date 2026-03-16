@@ -1,6 +1,6 @@
 import { Controller, Post, Body, HttpCode, HttpStatus, UseGuards, UseInterceptors, Res, Get, Req, ForbiddenException, UnauthorizedException, ConflictException, BadRequestException } from "@nestjs/common";
 import type { Response, Request } from "express";
-import { RegisterDto, LoginDto, ChangePasswordDto, UserProfileResponse, AuthResponse, OAuthUserResponse } from "./dto/auth.dto"; 
+import { RegisterDto, LoginDto, ChangePasswordDto, UserProfileResponse, AuthResponse, OAuthUserResponse, ExchangeCodeDto } from "./dto/auth.dto";
 import { RegisterService } from "./services/register.service";
 import { LoginService } from "./services/login.service";
 import { AuthService } from "./services/auth.service";
@@ -29,7 +29,48 @@ export class AuthController {
     private userService: UserService,
     private changePasswordService: ChangePasswordService,
     private csrfService: CsrfService,
-  ) {}
+  ) { }
+
+  @Post('exchange-oauth-code')
+  @Public()
+  @HttpCode(HttpStatus.OK)
+  async exchangeOAuthCode(
+    @Body() dto: ExchangeCodeDto,
+    @Res({ passthrough: true }) res: Response,
+  ): Promise<AuthResponse> {
+    try {
+      const tokens = await this.authService.exchangeOAuthCode(dto.code);
+
+      if (!tokens) {
+        throw new UnauthorizedException('Invalid or expired authorization code');
+      }
+
+      // Set RT cookie
+      res.cookie('refresh_token', tokens.refresh_token, {
+        httpOnly: true,
+        secure: process.env.NODE_ENV === 'production',
+        sameSite: 'lax',
+        maxAge: 7 * 24 * 60 * 60 * 1000,
+        path: '/',
+        domain: process.env.COOKIE_DOMAIN,
+      });
+
+      // Set CSRF token cookie
+      this.csrfService.setTokenCookie(
+        res,
+        tokens.csrf_token,
+        process.env.NODE_ENV === 'production',
+      );
+
+      return {
+        access_token: tokens.access_token,
+        csrf_token: tokens.csrf_token,
+      };
+    } catch (error) {
+      if (error instanceof UnauthorizedException) throw error;
+      throw new UnauthorizedException('Failed to exchange authorization code');
+    }
+  }
 
   @Post('register')
   @Public()
@@ -87,7 +128,7 @@ export class AuthController {
       // Set CSRF token in cookie for future requests
       this.csrfService.setTokenCookie(res, tokens.csrf_token, isProduction);
 
-      return { 
+      return {
         access_token: tokens.access_token,
         csrf_token: tokens.csrf_token, // Frontend needs this
       };
@@ -156,7 +197,7 @@ export class AuthController {
         process.env.NODE_ENV === 'production',
       );
 
-      return { 
+      return {
         access_token: tokens.access_token,
         csrf_token: tokens.csrf_token,
       };
@@ -208,7 +249,7 @@ export class AuthController {
       );
     }
 
-    const tokens = await this.authService.validateOAuthUser({
+    const result = await this.authService.validateOAuthUser({
       email: user.email,
       full_name: user.full_name,
       profile_avatar: user.profile_avatar,
@@ -216,28 +257,11 @@ export class AuthController {
       providerId: '', // Will be filled from Passport
     });
 
-    // Set RT cookie
-    res.cookie('refresh_token', tokens.refresh_token, {
-      httpOnly: true,
-      secure: process.env.NODE_ENV === 'production',
-      sameSite: 'lax',
-      maxAge: 7 * 24 * 60 * 60 * 1000,
-      path: '/',
-      domain: process.env.COOKIE_DOMAIN,
-    });
-
-    // Set CSRF token
-    this.csrfService.setTokenCookie(
-      res,
-      tokens.csrf_token,
-      process.env.NODE_ENV === 'production',
-    );
-
+    // Redirect to frontend with secure authorization code (no tokens in URL)
     const redirectUrl = new URL(
       `${process.env.FRONTEND_URL}/auth/oauth-callback`,
     );
-    redirectUrl.searchParams.append('access_token', tokens.access_token);
-    redirectUrl.searchParams.append('csrf_token', tokens.csrf_token);
+    redirectUrl.searchParams.append('code', result.authorizationCode);
     redirectUrl.searchParams.append('provider', 'google');
 
     return res.redirect(redirectUrl.toString());
@@ -265,7 +289,7 @@ export class AuthController {
       );
     }
 
-    const tokens = await this.authService.validateOAuthUser({
+    const result = await this.authService.validateOAuthUser({
       email: user.email,
       full_name: user.full_name,
       profile_avatar: user.profile_avatar,
@@ -273,26 +297,11 @@ export class AuthController {
       providerId: '', // Will be filled from Passport
     });
 
-    res.cookie('refresh_token', tokens.refresh_token, {
-      httpOnly: true,
-      secure: process.env.NODE_ENV === 'production',
-      sameSite: 'lax',
-      maxAge: 7 * 24 * 60 * 60 * 1000,
-      path: '/',
-      domain: process.env.COOKIE_DOMAIN,
-    });
-
-    this.csrfService.setTokenCookie(
-      res,
-      tokens.csrf_token,
-      process.env.NODE_ENV === 'production',
-    );
-
+    // Redirect to frontend with secure authorization code (no tokens in URL)
     const redirectUrl = new URL(
       `${process.env.FRONTEND_URL}/auth/oauth-callback`,
     );
-    redirectUrl.searchParams.append('access_token', tokens.access_token);
-    redirectUrl.searchParams.append('csrf_token', tokens.csrf_token);
+    redirectUrl.searchParams.append('code', result.authorizationCode);
     redirectUrl.searchParams.append('provider', 'github');
 
     return res.redirect(redirectUrl.toString());
