@@ -82,6 +82,12 @@ export class AuthResponse {
     csrf_token?: string; // Optional CSRF token for frontend
 }
 
+export class ExchangeCodeDto {
+    @IsString()
+    @IsNotEmpty({ message: 'Authorization code is required' })
+    code: string;
+}
+
 export interface OAuthProfile {
     provider: 'google' | 'github'; // Which OAuth provider
     providerId: string; // Provider's unique user ID (googleId / githubId)
