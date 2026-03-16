@@ -1,5 +1,6 @@
 import { Injectable, ForbiddenException, UnauthorizedException, Logger } from "@nestjs/common";
 import { JwtService } from '@nestjs/jwt';
+import { v4 as uuidv4 } from 'uuid';
 import * as bcrypt from 'bcrypt';
 import { TokenService } from "./token.service";
 import { JwtPayload, Tokens, OAuthProfile, OAuthUserResponse } from "../dto/auth.dto";
@@ -83,7 +84,7 @@ export class AuthService {
 
   async validateOAuthUser(
     oauthProfile: OAuthProfile,
-  ): Promise<OAuthUserResponse> {
+  ): Promise<{ authorizationCode: string }> {
     try {
       this.logger.debug(
         `[OAuth] Validating ${oauthProfile.provider} user: ${oauthProfile.email}`,
@@ -124,22 +125,74 @@ export class AuthService {
         `[OAuth] Generated tokens for user #${user.id} (${oauthProfile.provider})`,
       );
 
-      // return tokens with CSRF token for frontend
-      return {
-        id: user.id,
-        email: user.email,
-        full_name: user.full_name,
-        profile_avatar: user.profile_avatar,
+      // Generate authorization code for secure code exchange
+      const authorizationCode = uuidv4();
+      const redisKey = `oauth_code:${authorizationCode}`;
+      
+      // Store tokens in Redis with 5 minute TTL (300 seconds)
+      const oauthCodeData = {
         access_token: tokens.access_token,
         refresh_token: tokens.refresh_token,
         csrf_token: tokens.csrf_token,
+        userId: user.id,
+        email: user.email,
       };
+
+      await this.redisService.set(
+        redisKey,
+        JSON.stringify(oauthCodeData),
+        300, // 5 minutes TTL
+      );
+
+      this.logger.debug(
+        `[OAuth] Generated authorization code for user #${user.id}`,
+      );
+
+      return { authorizationCode };
     } catch (error) {
       this.logger.error(
         `[OAuth] Validation failed for ${oauthProfile.provider}: ${error.message}`,
         error.stack,
       );
       throw error;
+    }
+  }
+
+  async exchangeOAuthCode(authorizationCode: string): Promise<Tokens | null> {
+    try {
+      const redisKey = `oauth_code:${authorizationCode}`;
+      
+      // Get tokens from Redis
+      const storedData = await this.redisService.get(redisKey);
+      
+      if (!storedData) {
+        this.logger.warn(
+          `[OAuth] Authorization code exchange failed: invalid or expired code`,
+        );
+        return null;
+      }
+
+      // Parse the stored data
+      const oauthCodeData = JSON.parse(storedData);
+
+      // Delete the code immediately (single-use constraint)
+      await this.redisService.del(redisKey);
+
+      this.logger.debug(
+        `[OAuth] Successfully exchanged authorization code for user #${oauthCodeData.userId}`,
+      );
+
+      return {
+        access_token: oauthCodeData.access_token,
+        refresh_token: oauthCodeData.refresh_token,
+        csrf_token: oauthCodeData.csrf_token,
+      };
+    } catch (error) {
+      this.logger.error(
+        `[OAuth] Code exchange failed: ${error.message}`,
+        error.stack,
+      );
+      return null;
     }
   }
 }

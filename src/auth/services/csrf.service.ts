@@ -58,9 +58,7 @@ export class CsrfService {
     return headerToken === cookieToken;
   }
 
-  /**
-   * Clear CSRF token (on logout)
-   */
+  // logout 
   clearToken(res: Response): void {
     res.clearCookie(this.CSRF_COOKIE_NAME, {
       httpOnly: false,
