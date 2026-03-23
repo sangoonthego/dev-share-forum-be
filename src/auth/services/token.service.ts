@@ -112,50 +112,56 @@ export class TokenService {
   ): Promise<{ valid: boolean; shouldRotate: boolean; reuseDetected: boolean }> {
     const familyKey = `rt:${userId}:${decodedFamily}`;
     const currentFamilyKey = `rt_family:${userId}`;
-    const storedHash = await this.getRefreshTokenHashFromRedis(userId, decodedFamily);
 
-    if (!storedHash) {
-      this.logger.logSecurityEvent(
-        'Refresh token from old family attempted - possible reuse attack',
-        userId,
-        { family: decodedFamily },
-      );
-      return {
-        valid: false,
-        shouldRotate: false,
-        reuseDetected: true,
-      };
-    }
+    const script = `
+      local familyKey = KEYS[1]
+      local currentFamilyKey = KEYS[2]
+      local decodedFamily = ARGV[1]
 
-    const hashValid = await bcrypt.compare(rt, storedHash);
-    if (!hashValid) {
-      this.logger.logSecurityEvent(
-        'Refresh token hash mismatch - possible token tampering',
-        userId,
-      );
-      return {
-        valid: false,
-        shouldRotate: false,
-        reuseDetected: false,
-      };
-    }
+      local storedHash = redis.call('GET', familyKey)
+      if not storedHash then
+        return {0, 1, ''}
+      end
 
-    // Atomic check-and-set: verify family + mark as rotating
+      local currentFamily = redis.call('GET', currentFamilyKey)
+      if currentFamily and currentFamily ~= decodedFamily then
+        redis.call('DEL', familyKey)
+        return {0, 1, ''}
+      end
+
+      return {1, 0, storedHash}
+    `;
+
     try {
-      const redisClient = (this.redisService as any).redis;
-      const currentFamily = await redisClient.get(currentFamilyKey);
+      const redisClient = this.redisService.getClient();
+      const result = await redisClient.eval(script, 2, familyKey, currentFamilyKey, decodedFamily) as [number, number, string];
 
-      if (currentFamily && currentFamily !== decodedFamily) {
+      const [isValidState, isReuseDetected, storedHash] = result;
+
+      if (isReuseDetected === 1) {
         this.logger.logSecurityEvent(
-          'Token family mismatch - refresh token reuse detected',
+          'Token reuse detected or missing token family - possible reuse attack',
           userId,
-          { providedFamily: decodedFamily, currentFamily },
+          { providedFamily: decodedFamily },
         );
         await this.revokeAllTokens(userId);
         return {
           valid: false,
           shouldRotate: false,
           reuseDetected: true,
+        };
+      }
+
+      const hashValid = await bcrypt.compare(rt, storedHash);
+      if (!hashValid) {
+        this.logger.logSecurityEvent(
+          'Refresh token hash mismatch - possible token tampering',
+          userId,
+        );
+        return {
+          valid: false,
+          shouldRotate: false,
+          reuseDetected: false,
         };
       }
 
