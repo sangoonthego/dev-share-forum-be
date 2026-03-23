@@ -17,7 +17,7 @@ export class TokenService {
     private jwtService: JwtService,
     private redisService: RedisService,
     private logger: LoggerService,
-  ) {}
+  ) { }
 
   async getTokens(
     userId: number,
@@ -28,21 +28,21 @@ export class TokenService {
   ): Promise<TokensWithCsrf> {
     const jti = uuidv4();
     const csrfToken = uuidv4(); // CSRF token for double-submit pattern
-    
+
     // Generate token family if not provided (first login)
     const family = tokenFamily || uuidv4();
-    
+
     // Calculate expiry times
-    const atExpiresIn = 15 * 60; 
-    const rtExpiresIn = 7 * 24 * 60 * 60; 
+    const atExpiresIn = 15 * 60;
+    const rtExpiresIn = 7 * 24 * 60 * 60;
 
     const atPayload: JwtPayload = {
       sub: userId,
       email,
       role,
       version: tokenVersion,
-      jti, 
-      family, 
+      jti,
+      family,
     };
 
     const rtPayload: JwtPayload = {
@@ -50,7 +50,7 @@ export class TokenService {
       email,
       role,
       version: tokenVersion,
-      family, 
+      family,
     };
 
     const [accessToken, refreshToken] = await Promise.all([
@@ -80,13 +80,13 @@ export class TokenService {
     family: string,
   ): Promise<void> {
     const hash = await bcrypt.hash(rt, 10);
-    
+
     const familyKey = `rt:${userId}:${family}`;
     const currentFamilyKey = `rt_family:${userId}`;
 
     // Store RT hash with family
     await this.redisService.set(familyKey, hash, expiresIn);
-    
+
     // Track current family (for reuse detection)
     await this.redisService.set(currentFamilyKey, family, expiresIn);
 
@@ -102,8 +102,8 @@ export class TokenService {
   }
 
   /**
-   * Atomic token rotation verification using Lua script
-   * Prevents race conditions in concurrent refresh scenarios
+   * TRUE Atomic token rotation verification using Lua script
+   * Prevents TOCTOU Race Conditions by enforcing a "Check-and-Consume" lock.
    */
   async verifyRefreshTokenAtomic(
     userId: number,
@@ -113,34 +113,70 @@ export class TokenService {
     const familyKey = `rt:${userId}:${decodedFamily}`;
     const currentFamilyKey = `rt_family:${userId}`;
 
+    // read current hash
+    const storedHash = await this.redisService.get(familyKey);
+
+    // check pass by bcrypt (Tốn CPU ~100ms)
+    // Lúc này Node.js thoải mái nhường Event Loop. Ta không block Redis.
+    if (storedHash) {
+      const hashValid = await bcrypt.compare(rt, storedHash);
+      if (!hashValid) {
+        this.logger.logSecurityEvent('Refresh token hash mismatch - possible token tampering', userId);
+        return { valid: false, shouldRotate: false, reuseDetected: false };
+      }
+    }
+
+    // (Atomic Check-and-Consume)
+    // Chỉ những request vượt qua được Bcrypt mới vào tới đây.
     const script = `
       local familyKey = KEYS[1]
       local currentFamilyKey = KEYS[2]
       local decodedFamily = ARGV[1]
-
-      local storedHash = redis.call('GET', familyKey)
-      if not storedHash then
-        return {0, 1, ''}
-      end
+      local expectedHash = ARGV[2] -- Có thể rỗng nếu storedHash ban đầu là null
 
       local currentFamily = redis.call('GET', currentFamilyKey)
+      local currentHash = redis.call('GET', familyKey)
+
+      -- 1. Family bị thay đổi -> Kẻ gian đang dùng Token cũ của một nhánh (Family) khác
       if currentFamily and currentFamily ~= decodedFamily then
         redis.call('DEL', familyKey)
-        return {0, 1, ''}
+        return 0 -- REUSE DETECTED
       end
 
-      return {1, 0, storedHash}
+      -- 2. Race Condition (TOCTOU) Caught!
+      -- Phát hiện có kẻ "nẫng tay trên": Lúc đầu get có Hash, giờ Hash đã biến mất hoặc bị đổi 
+      -- do một request chạy song song vừa Consume nó.
+      if currentHash ~= expectedHash then
+        return 0 -- REUSE DETECTED
+      end
+
+      -- 3. Hợp lệ & Trúng đích (Winner of the race)
+      -- NGAY LẬP TỨC XÓA HASH để các request song song đến sau bị dính vào Case 2.
+      -- Hàm getTokens() sau đó sẽ tự động set lại Hash mới vào Redis.
+      if currentHash then
+        redis.call('DEL', familyKey)
+        return 1 -- SUCCESS
+      end
+
+      -- 4. Expired/Invalid (Không có hash từ đầu, nhưng không vi phạm reuse)
+      return 2
     `;
 
     try {
       const redisClient = this.redisService.getClient();
-      const result = await redisClient.eval(script, 2, familyKey, currentFamilyKey, decodedFamily) as [number, number, string];
+      // Truyền storedHash vào ARGV[2]. Dùng || '' để tránh lỗi khi storedHash null
+      const result = await redisClient.eval(
+        script,
+        2,
+        familyKey,
+        currentFamilyKey,
+        decodedFamily,
+        storedHash || ''
+      ) as number;
 
-      const [isValidState, isReuseDetected, storedHash] = result;
-
-      if (isReuseDetected === 1) {
+      if (result === 0) {
         this.logger.logSecurityEvent(
-          'Token reuse detected or missing token family - possible reuse attack',
+          'Token reuse detected or Race Condition caught - triggering revocation',
           userId,
           { providedFamily: decodedFamily },
         );
@@ -152,12 +188,7 @@ export class TokenService {
         };
       }
 
-      const hashValid = await bcrypt.compare(rt, storedHash);
-      if (!hashValid) {
-        this.logger.logSecurityEvent(
-          'Refresh token hash mismatch - possible token tampering',
-          userId,
-        );
+      if (result === 2 || !storedHash) {
         return {
           valid: false,
           shouldRotate: false,
@@ -165,6 +196,7 @@ export class TokenService {
         };
       }
 
+      // result === 1 (Trường hợp duy nhất hợp lệ)
       return {
         valid: true,
         shouldRotate: true,
@@ -203,7 +235,7 @@ export class TokenService {
 
   async verifyRefreshTokenLegacy(userId: number, rt: string): Promise<boolean> {
     const storedHash = await this.getRefreshTokenHashFromRedisLegacy(userId);
-    
+
     if (!storedHash) {
       return false;
     }
