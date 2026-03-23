@@ -3,7 +3,11 @@ import { Redis } from 'ioredis';
 
 @Injectable()
 export class RedisService {
-  constructor(@Inject('REDIS_CLIENT') private redis: Redis) {}
+  constructor(@Inject('REDIS_CLIENT') private redis: Redis) { }
+
+  getClient(): Redis {
+    return this.redis;
+  }
 
   async blacklistToken(jti: string, expiresIn: number): Promise<void> {
     const key = `blacklist:${jti}`;
@@ -121,29 +125,27 @@ export class RedisService {
   async getWithStampedeProtection<T>(
     key: string,
     computeFn: () => Promise<T>,
-    ttl: number = 3600, // Default 1 hour
+    ttl: number = 3600,
   ): Promise<T> {
-    // 1. Try to get from cache
     const cached = await this.redis.get(key);
     if (cached) {
       return JSON.parse(cached);
     }
 
-    // 2. Acquire lock to prevent stampede
+    // Acquire lock to prevent stampede
     const lockKey = `lock:${key}`;
     const lockValue = Date.now().toString();
-    const lockTTL = 10; 
+    const lockTTL = 10;
 
     const acquired = await this.redis.set(
       lockKey,
       lockValue,
       'EX',
       lockTTL,
-      'NX', 
+      'NX',
     );
 
     if (!acquired) {
-      // Another process is computing, wait and retry
       await new Promise((resolve) => setTimeout(resolve, 100));
       const retryValue = await this.redis.get(key);
       if (retryValue) {
@@ -152,15 +154,12 @@ export class RedisService {
     }
 
     try {
-      // 3. Compute new value
       const value = await computeFn();
 
-      // 4. Store in cache
       await this.redis.setex(key, ttl, JSON.stringify(value));
 
       return value;
     } finally {
-      // 5. Release lock
       const currentLock = await this.redis.get(lockKey);
       if (currentLock === lockValue) {
         await this.redis.del(lockKey);
@@ -175,7 +174,7 @@ export class RedisService {
     xfetch: number = 0.1,
   ): Promise<T> {
     const cached = await this.redis.get(key);
-    
+
     if (cached) {
       const ttlRemaining = await this.redis.ttl(key);
       const recomputeThreshold = ttl * xfetch;
@@ -183,7 +182,7 @@ export class RedisService {
       // Check if we should recompute probabilistically
       if (ttlRemaining > 0 && ttlRemaining < recomputeThreshold) {
         const probability = 1 - ttlRemaining / recomputeThreshold;
-        
+
         if (Math.random() < probability) {
           // Recompute in background (fire and forget)
           this.getWithStampedeProtection(key, computeFn, ttl).catch(
@@ -201,7 +200,7 @@ export class RedisService {
 
   async invalidateByTag(tag: string): Promise<number> {
     const tagKey = `tag:${tag}`;
-    
+
     try {
       // Get all keys with this tag
       const keys = await (this.redis as any).smembers(tagKey);
@@ -210,7 +209,7 @@ export class RedisService {
       if (keys && keys.length > 0) {
         // Delete all tagged keys
         deletedCount = await (this.redis as any).del(...keys);
-        
+
         // Delete tag set itself
         await this.redis.del(tagKey);
       }
@@ -234,12 +233,10 @@ export class RedisService {
       await this.redis.set(key, value);
     }
 
-    // Add key to each tag set
     for (const tag of tags) {
       const tagKey = `tag:${tag}`;
       await this.redis.sadd(tagKey, key);
-      
-      // Tag itself expires with the key
+
       if (ttl) {
         await this.redis.expire(tagKey, ttl);
       }
@@ -248,7 +245,7 @@ export class RedisService {
 
   async getAndRefresh(key: string, ttl?: number): Promise<string | null> {
     const value = await this.redis.get(key);
-    
+
     if (value && ttl) {
       await this.redis.expire(key, ttl);
     }
@@ -256,7 +253,6 @@ export class RedisService {
     return value;
   }
 
-  // Public methods for rate limiting and counters
   async incr(key: string): Promise<number> {
     return await this.redis.incr(key);
   }
