@@ -63,7 +63,19 @@ export class AuthService {
       throw new ForbiddenException('Invalid refresh token');
     }
 
-    const tokens = await this.tokenService.getTokens(userId, '', '', 1, decodedRt.family);
+    const user = await this.userService.findById(userId);
+
+    if (!user) {
+      throw new ForbiddenException('User not found');
+    }
+
+    const tokens = await this.tokenService.getTokens(
+      userId,
+      user.email,
+      user.role,
+      user.token_version,
+      decodedRt.family
+    );
 
     return tokens;
   }
@@ -118,7 +130,7 @@ export class AuthService {
         user.id,
         user.email,
         user.role || 'USER',
-        1, 
+        user.token_version, 
       );
 
       this.logger.debug(

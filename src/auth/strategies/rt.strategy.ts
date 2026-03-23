@@ -3,10 +3,11 @@ import { ExtractJwt, Strategy, StrategyOptionsWithRequest } from 'passport-jwt';
 import type { Request } from 'express';
 import { Injectable, UnauthorizedException } from '@nestjs/common';
 import type { JwtPayload } from '../dto/auth.dto';
+import { PrismaService } from 'src/prisma/prisma.service';
 
 @Injectable()
 export class RtStrategy extends PassportStrategy(Strategy, 'jwt-refresh') {
-  constructor() {
+  constructor(private prisma: PrismaService) {
     const options: StrategyOptionsWithRequest = {
       jwtFromRequest: ExtractJwt.fromExtractors([
         (req: Request) => {
@@ -23,7 +24,7 @@ export class RtStrategy extends PassportStrategy(Strategy, 'jwt-refresh') {
     super(options);
   }
 
-  validate(req: Request, payload: any): JwtPayload & { refreshToken: string } {
+  async validate(req: Request, payload: any): Promise<JwtPayload & { refreshToken: string }> {
     const refreshToken =
       req?.cookies?.refresh_token ||
       req.get('authorization')?.replace('Bearer', '').trim();
@@ -32,8 +33,23 @@ export class RtStrategy extends PassportStrategy(Strategy, 'jwt-refresh') {
       throw new UnauthorizedException('Refresh token not found');
     }
 
+    const jwtPayload = payload as JwtPayload;
+
+    const user = await this.prisma.users.findUnique({
+      where: { id: jwtPayload.sub },
+      select: { token_version: true },
+    });
+
+    if (!user) {
+      throw new UnauthorizedException('User no longer exists');
+    }
+
+    if (user.token_version !== jwtPayload.version) {
+      throw new UnauthorizedException('Session invalidated due to security changes');
+    }
+
     return {
-      ...(payload as JwtPayload),
+      ...jwtPayload,
       refreshToken,
     };
   }

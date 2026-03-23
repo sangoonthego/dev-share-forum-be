@@ -4,7 +4,7 @@ import { UserProfileResponse, OAuthProfile } from '../dto/auth.dto';
 
 @Injectable()
 export class UserService {
-  constructor(private prisma: PrismaService) {}
+  constructor(private prisma: PrismaService) { }
 
   async getUserProfile(userId: number): Promise<UserProfileResponse> {
     const user = await this.prisma.users.findUnique({
@@ -54,6 +54,12 @@ export class UserService {
     });
 
     return user as UserProfileResponse;
+  }
+
+  async findById(userId: number) {
+    return this.prisma.users.findUnique({
+      where: { id: userId }
+    })
   }
 
   async addKarma(userId: number, points: number): Promise<number> {
