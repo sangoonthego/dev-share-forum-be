@@ -9,6 +9,7 @@ import { ChangePasswordService } from "./services/change-password.service";
 import { CsrfService } from "./services/csrf.service";
 import { AtGuard } from "src/common/guards/at.guard";
 import { RtGuard } from "src/common/guards/rt.guard";
+import { RefreshRateLimitGuard } from "src/common/guards/refresh-rate-limit.guard";
 import { GoogleAuthGuard } from "src/common/guards/google-auth.guard";
 import { GitHubAuthGuard } from "src/common/guards/github-auth.guard";
 import { RateLimitGuard } from "src/common/guards/rate-limit.guard";
@@ -205,7 +206,7 @@ export class AuthController {
   }
 
   @Public()
-  @UseGuards(RtGuard, GlobalRateLimitGuard) // Add rate limit to refresh
+  @UseGuards(RtGuard, RefreshRateLimitGuard) // Add rate limit to refresh
   @Post('refresh')
   @HttpCode(HttpStatus.OK)
   async refresh(
