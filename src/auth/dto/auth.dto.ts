@@ -4,9 +4,10 @@ export class JwtPayload {
     sub: number;
     email: string;
     role: string;
-    version: number; 
-    jti?: string; 
+    version: number;
+    jti?: string;
     family: string;
+    csrf_token?: string;
 }
 
 export interface Tokens {
@@ -86,6 +87,35 @@ export class ExchangeCodeDto {
     @IsString()
     @IsNotEmpty({ message: 'Authorization code is required' })
     code: string;
+}
+
+export class VerifyEmailDto {
+    @IsString()
+    @IsNotEmpty({ message: 'Verification token is required' })
+    token: string;
+}
+
+export class ResendVerificationDto {
+    @IsEmail({}, { message: 'Invalid email format' })
+    @IsNotEmpty({ message: 'Email is required' })
+    email: string;
+}
+
+export class ForgotPasswordDto {
+    @IsEmail({}, { message: 'Invalid email format' })
+    @IsNotEmpty({ message: 'Email is required' })
+    email: string;
+}
+
+export class ResetPasswordDto {
+    @IsString()
+    @IsNotEmpty({ message: 'Reset token is required' })
+    token: string;
+
+    @IsString()
+    @IsNotEmpty({ message: 'New password is required' })
+    @MinLength(6, { message: 'New password must be at least 6 characters' })
+    new_password: string;
 }
 
 export interface OAuthProfile {

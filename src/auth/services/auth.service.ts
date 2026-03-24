@@ -1,4 +1,4 @@
-import { Injectable, ForbiddenException, UnauthorizedException, Logger } from "@nestjs/common";
+import { Injectable, ForbiddenException, UnauthorizedException, Logger, BadRequestException, HttpException, HttpStatus } from "@nestjs/common";
 import { JwtService } from '@nestjs/jwt';
 import { v4 as uuidv4 } from 'uuid';
 import * as bcrypt from 'bcrypt';
@@ -6,6 +6,7 @@ import { TokenService } from "./token.service";
 import { JwtPayload, Tokens, OAuthProfile, OAuthUserResponse } from "../dto/auth.dto";
 import { RedisService } from "src/redis/redis.service";
 import { UserService } from "./user.service";
+import { PrismaService } from "src/prisma/prisma.service";
 
 @Injectable()
 export class AuthService {
@@ -16,6 +17,7 @@ export class AuthService {
     private redisService: RedisService,
     private jwtService: JwtService,
     private userService: UserService,
+    private prisma: PrismaService,
   ) { }
 
   async hashData(data: string) {
@@ -195,5 +197,119 @@ export class AuthService {
       );
       return null;
     }
+  }
+
+  async verifyEmail(token: string): Promise<{ message: string }> {
+    const redisKey = `verify_email:${token}`;
+    const userIdStr = await this.redisService.get(redisKey);
+
+    if (!userIdStr) {
+      throw new BadRequestException('Invalid or expired token');
+    }
+
+    const userId = parseInt(userIdStr, 10);
+
+    await this.prisma.users.update({
+      where: { id: userId },
+      data: { is_verified: true },
+    });
+
+    await this.redisService.del(redisKey);
+    return { message: 'Email verified successfully. You can now login.' };
+  }
+
+  async resendVerification(email: string): Promise<{ message: string }> {
+    const successMessage = 'If your account exists and is unverified, a new link has been sent';
+
+    const user = await this.prisma.users.findUnique({
+      where: { email },
+    });
+
+    if (!user || user.is_verified) {
+      return { message: successMessage };
+    }
+
+    const rateLimitKey = `resend_cooldown:${user.id}`;
+    const rateLimit = await this.redisService.get(rateLimitKey);
+
+    if (rateLimit) {
+      throw new HttpException('Too Many Requests', HttpStatus.TOO_MANY_REQUESTS);
+    }
+
+    await this.redisService.set(rateLimitKey, "1", 60); // 1 minute TTL
+
+    const verificationToken = uuidv4();
+    const redisKey = `verify_email:${verificationToken}`;
+
+    // Store in Redis (TTL = 24 hours)
+    await this.redisService.set(redisKey, user.id.toString(), 86400);
+
+    const verificationLink = `${process.env.FRONTEND_URL}/auth/verify-email?token=${verificationToken}`;
+    this.logger.log(`Sending email to: ${user.email} Link: /auth/verify-email?token=${verificationToken}`);
+
+    return { message: successMessage };
+  }
+
+  async forgotPassword(email: string): Promise<{ message: string }> {
+    const successMessage = 'If your email is registered, a reset link has been sent.';
+
+    const user = await this.prisma.users.findUnique({
+      where: { email },
+    });
+
+    if (!user) {
+      return { message: successMessage };
+    }
+
+    // Rate limiting to prevent email bombing
+    const rateLimitKey = `forgot_password_limit:${user.id}`;
+    const rateLimit = await this.redisService.get(rateLimitKey);
+
+    if (rateLimit) {
+      // Return success message even if rate limited to prevent enumeration via rate limits
+      // Or throw an exception. The instruction says "ALWAYS return the exact same success message... Do not leak whether the user exists."
+      // If we throw exception for existing users but not non-existing users, we leak.
+      // So we just silently don't send the email if rate limited, or we apply rate limit by email/IP.
+      // Applying rate limit silently is safer.
+      return { message: successMessage };
+    }
+
+    await this.redisService.set(rateLimitKey, "1", 60);
+
+    const resetToken = uuidv4();
+    const redisKey = `reset_password:${resetToken}`;
+
+    await this.redisService.set(redisKey, user.id.toString(), 3600); // 1 hour TTL
+
+    const resetLink = `${process.env.FRONTEND_URL}/auth/reset-password?token=${resetToken}`;
+    this.logger.log(`[Mock Email] Sending password reset email to ${user.email}: ${resetLink}`);
+
+    return { message: successMessage };
+  }
+
+  async resetPassword(token: string, newPassword: string): Promise<{ message: string }> {
+    const redisKey = `reset_password:${token}`;
+    const userIdStr = await this.redisService.get(redisKey);
+
+    if (!userIdStr) {
+      throw new ForbiddenException('Invalid or expired reset token');
+    }
+
+    const userId = parseInt(userIdStr, 10);
+    const passwordHash = await bcrypt.hash(newPassword, 10);
+
+    await this.prisma.users.update({
+      where: { id: userId },
+      data: {
+        password_hash: passwordHash,
+        token_version: { increment: 1 } // revoke all existing sessions
+      },
+    });
+
+    await this.redisService.del(redisKey);
+    // Revoke family sessions on redis
+    await this.redisService.revokeAllTokens(userId);
+
+    return { message: 'Password has been successfully reset. You can now login.' };
   }
 }

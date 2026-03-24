@@ -1,4 +1,4 @@
-import { Injectable, UnauthorizedException } from "@nestjs/common";
+import { Injectable, UnauthorizedException, ForbiddenException } from "@nestjs/common";
 import { PrismaService } from "src/prisma/prisma.service";
 import * as bcrypt from 'bcrypt';
 import { LoginDto, Tokens } from "../dto/auth.dto";
@@ -12,7 +12,7 @@ export class LoginService {
     private prisma: PrismaService,
     private tokenService: TokenService,
     private auditService: LoginAuditService,
-  ) {}
+  ) { }
 
   async execute(
     dto: LoginDto,
@@ -45,6 +45,10 @@ export class LoginService {
         dto.email,
       );
       throw new UnauthorizedException('Invalid credentials');
+    }
+
+    if (!user.is_verified) {
+      throw new ForbiddenException('Account not verified. Please check your email or request a new verification link.');
     }
 
     const tokens = await this.tokenService.getTokens(

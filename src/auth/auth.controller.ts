@@ -1,6 +1,6 @@
 import { Controller, Post, Body, HttpCode, HttpStatus, UseGuards, UseInterceptors, Res, Get, Req, ForbiddenException, UnauthorizedException, ConflictException, BadRequestException } from "@nestjs/common";
 import type { Response, Request } from "express";
-import { RegisterDto, LoginDto, ChangePasswordDto, UserProfileResponse, AuthResponse, OAuthUserResponse, ExchangeCodeDto } from "./dto/auth.dto";
+import { RegisterDto, LoginDto, ChangePasswordDto, UserProfileResponse, AuthResponse, OAuthUserResponse, ExchangeCodeDto, VerifyEmailDto, ResendVerificationDto, ForgotPasswordDto, ResetPasswordDto } from "./dto/auth.dto";
 import { RegisterService } from "./services/register.service";
 import { LoginService } from "./services/login.service";
 import { AuthService } from "./services/auth.service";
@@ -48,8 +48,8 @@ export class AuthController {
       // Set RT cookie
       res.cookie('refresh_token', tokens.refresh_token, {
         httpOnly: true,
-        secure: process.env.NODE_ENV === 'production',
-        sameSite: 'lax',
+        secure: true,
+        sameSite: 'none',
         maxAge: 7 * 24 * 60 * 60 * 1000,
         path: '/',
         domain: process.env.COOKIE_DOMAIN,
@@ -90,6 +90,37 @@ export class AuthController {
     }
   }
 
+  @Post('verify-email')
+  @Public()
+  @HttpCode(HttpStatus.OK)
+  async verifyEmail(@Body() dto: VerifyEmailDto) {
+    return this.authService.verifyEmail(dto.token);
+  }
+
+  @Post('resend-verification')
+  @Public()
+  @HttpCode(HttpStatus.OK)
+  @UseGuards(RateLimitGuard)
+  async resendVerification(@Body() dto: ResendVerificationDto) {
+    return this.authService.resendVerification(dto.email);
+  }
+
+  @Post('forgot-password')
+  @Public()
+  @HttpCode(HttpStatus.OK)
+  @UseGuards(RateLimitGuard)
+  async forgotPassword(@Body() dto: ForgotPasswordDto) {
+    return this.authService.forgotPassword(dto.email);
+  }
+
+  @Post('reset-password')
+  @Public()
+  @HttpCode(HttpStatus.OK)
+  @UseGuards(RateLimitGuard)
+  async resetPassword(@Body() dto: ResetPasswordDto) {
+    return this.authService.resetPassword(dto.token, dto.new_password);
+  }
+
   @Post('login')
   @Public()
   @HttpCode(HttpStatus.OK)
@@ -118,8 +149,8 @@ export class AuthController {
       // Set refresh token cookie
       res.cookie('refresh_token', tokens.refresh_token, {
         httpOnly: true,
-        secure: isProduction,
-        sameSite: 'strict',
+        secure: true,
+        sameSite: 'none',
         maxAge: 7 * 24 * 60 * 60 * 1000,
         path: '/',
         domain: process.env.COOKIE_DOMAIN,
@@ -162,8 +193,8 @@ export class AuthController {
     // Clear both RT and CSRF cookies
     res.clearCookie('refresh_token', {
       httpOnly: true,
-      secure: process.env.NODE_ENV === 'production',
-      sameSite: 'strict',
+      secure: true,
+      sameSite: 'none',
       path: '/',
     });
     this.csrfService.clearToken(res);
@@ -171,6 +202,7 @@ export class AuthController {
     return { success: true };
   }
 
+  @Public()
   @UseGuards(RtGuard, GlobalRateLimitGuard) // Add rate limit to refresh
   @Post('refresh')
   @HttpCode(HttpStatus.OK)
@@ -184,8 +216,8 @@ export class AuthController {
       // Set new RT cookie
       res.cookie('refresh_token', tokens.refresh_token, {
         httpOnly: true,
-        secure: process.env.NODE_ENV === 'production',
-        sameSite: 'strict',
+        secure: true,
+        sameSite: 'none',
         maxAge: 7 * 24 * 60 * 60 * 1000,
         path: '/',
       });

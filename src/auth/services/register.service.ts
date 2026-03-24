@@ -1,18 +1,23 @@
-import { Injectable, ConflictException } from "@nestjs/common";
+import { Injectable, ConflictException, Logger } from "@nestjs/common";
 import { PrismaService } from "src/prisma/prisma.service";
 import * as bcrypt from 'bcrypt';
+import { v4 as uuidv4 } from 'uuid';
 import { RegisterDto } from "../dto/auth.dto";
 import { TokenService } from "./token.service";
 import { Tokens } from "../dto/auth.dto";
+import { RedisService } from "src/redis/redis.service";
 
 @Injectable()
 export class RegisterService {
+  private logger = new Logger(RegisterService.name);
+
   constructor(
     private prisma: PrismaService,
     private tokenService: TokenService,
-  ) {}
+    private redisService: RedisService,
+  ) { }
 
-  async execute(dto: RegisterDto): Promise<Tokens> {
+  async execute(dto: RegisterDto): Promise<{ message: string }> {
     const userExists = await this.prisma.users.findUnique({
       where: { email: dto.email },
     });
@@ -26,17 +31,20 @@ export class RegisterService {
         email: dto.email,
         password_hash: passwordHash,
         full_name: dto.full_name,
-        token_version: 1, 
+        token_version: 1,
+        is_verified: false,
       },
     });
 
-    const tokens = await this.tokenService.getTokens(
-      newUser.id,
-      newUser.email,
-      newUser.role,
-      newUser.token_version,
-    );
+    const verificationToken = uuidv4();
+    const redisKey = `verify_email:${verificationToken}`;
 
-    return tokens;
+    // Store in Redis (TTL = 24 hours = 86400 seconds)
+    await this.redisService.set(redisKey, newUser.id.toString(), 86400);
+
+    const verificationLink = `${process.env.FRONTEND_URL}/auth/verify-email?token=${verificationToken}`;
+    this.logger.log(`Sending email to: ${newUser.email} Link: /auth/verify-email?token=${verificationToken}`);
+
+    return { message: 'Registration successful. Please check your email to verify your account.' };
   }
 }

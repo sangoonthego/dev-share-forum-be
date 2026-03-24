@@ -39,45 +39,46 @@ model refresh_tokens {
 }
 
 model users {
-  id            Int       @id @default(autoincrement())
-  email         String    @unique
-  full_name     String?
-  password_hash String
-  role          UserRole  @default(USER)
-  phone         String?
-  profile_avatar String?  // Avatar URL/path
-  karma         Int       @default(0)
-  token_version Int       @default(1) // For password change revocation
-  is_banned     Boolean   @default(false) // Account ban status for anti-abuse
-  meta          Json?     @default("{}")
-  created_at    DateTime  @default(now())
-  updated_at    DateTime  @updatedAt
+  id             Int      @id @default(autoincrement())
+  email          String   @unique
+  full_name      String?
+  password_hash  String
+  role           UserRole @default(USER)
+  phone          String?
+  profile_avatar String? // Avatar URL/path
+  karma          Int      @default(0)
+  token_version  Int      @default(1) // For password change revocation  
+  is_verified   Boolean   @default(false) // Email verification status  
+  is_banned      Boolean  @default(false) // Account ban status for anti-abuse
+  meta           Json?    @default("{}")
+  created_at     DateTime @default(now())
+  updated_at     DateTime @updatedAt
 
-  posts         posts[]
-  comments      comments[]
-  refresh_tokens refresh_tokens[]
-  login_audits  login_audits[]
-  notifications notifications[]
-  media_assets  media_assets[]
+  posts           posts[]
+  comments        comments[]
+  refresh_tokens  refresh_tokens[]
+  login_audits    login_audits[]
+  notifications   notifications[]
+  media_assets    media_assets[]
   user_activities user_activities[]
 
   @@map("users")
 }
 
 model posts {
-  id               Int      @id @default(autoincrement())
+  id               Int        @id @default(autoincrement())
   title            String
-  slug             String   @unique
+  slug             String     @unique
   content_markdown String
-  is_published     Boolean  @default(false)
+  is_published     Boolean    @default(false)
   status           PostStatus @default(PUBLISHED) // DRAFT, PUBLISHED, ARCHIVED
-  view_count       Int      @default(0)
-  
+  view_count       Int        @default(0)
+
   // Soft delete support
-  deleted_at       DateTime?
-  
+  deleted_at DateTime?
+
   // Hỗ trợ AI Search (Vector 768 dimensions - chuẩn của model Gemini text-embedding-004)
-  embedding        Unsupported("vector(768)")? 
+  embedding Unsupported("vector(768)")?
 
   author_id Int
   author    users @relation(fields: [author_id], references: [id])
@@ -85,9 +86,9 @@ model posts {
   created_at DateTime @default(now())
   updated_at DateTime @updatedAt
 
-  comments      comments[]
-  posts_tags    posts_tags[]
-  media_assets  media_assets[]
+  comments     comments[]
+  posts_tags   posts_tags[]
+  media_assets media_assets[]
 
   @@index([deleted_at]) // For efficient soft delete filtering
   @@index([status]) // For filtering drafts
@@ -96,26 +97,26 @@ model posts {
 }
 
 model comments {
-  id        Int    @id @default(autoincrement())
-  content   String
-  
-  post_id   Int
-  post      posts @relation(fields: [post_id], references: [id])
+  id      Int    @id @default(autoincrement())
+  content String
+
+  post_id Int
+  post    posts @relation(fields: [post_id], references: [id])
 
   author_id Int
   author    users @relation(fields: [author_id], references: [id])
 
   parent_id Int?
-  parent    comments? @relation("CommentReplies", fields: [parent_id], references: [id])
+  parent    comments?  @relation("CommentReplies", fields: [parent_id], references: [id])
   replies   comments[] @relation("CommentReplies")
 
   // Anti-abuse: Max depth limit (5 levels) - comments at depth 5 remain at 5
   // Example: depth 0 = root, depth 1 = replies to root, depth 5 = max level
-  depth     Int       @default(0)
+  depth Int @default(0)
 
   // Atomic reaction counters for high concurrency (use increment/decrement)
-  likes     Int       @default(0)
-  dislikes  Int       @default(0)
+  likes    Int @default(0)
+  dislikes Int @default(0)
 
   // Soft delete support
   deleted_at DateTime?
@@ -154,14 +155,14 @@ enum LoginStatus {
 }
 
 model login_audits {
-  id        Int         @id @default(autoincrement())
-  user_id   Int?        // Nullable - for failed login attempts
-  user      users?      @relation(fields: [user_id], references: [id], onDelete: SetNull)
-  status    LoginStatus @default(SUCCESS)
-  ip_address String?
-  user_agent String?
+  id              Int         @id @default(autoincrement())
+  user_id         Int? // Nullable - for failed login attempts
+  user            users?      @relation(fields: [user_id], references: [id], onDelete: SetNull)
+  status          LoginStatus @default(SUCCESS)
+  ip_address      String?
+  user_agent      String?
   attempted_email String? // For tracking failed login attempts
-  created_at DateTime   @default(now())
+  created_at      DateTime    @default(now())
 
   @@index([user_id])
   @@index([created_at])
@@ -170,37 +171,34 @@ model login_audits {
 
 /**
  * Notifications Model - Real-time notification persistence
- * 
  * Storage Strategy:
  * - Persistent: Saved in PostgreSQL for reliability
  * - Delivery: WebSockets push to online users instantly
  * - History: Users can view unread notifications via API
- * 
  * Triggers:
  * - User replies to comment → Notify parent comment author
  * - User comments on post → Notify post author
- * 
  * Lifecycle:
  * - isRead: false on creation, updated when user views
  * - Archive: Notifications older than 30 days can be archived
  */
 model notifications {
-  id        Int     @id @default(autoincrement())
-  user_id   Int
-  user      users   @relation(fields: [user_id], references: [id], onDelete: Cascade)
-  
+  id      Int   @id @default(autoincrement())
+  user_id Int
+  user    users @relation(fields: [user_id], references: [id], onDelete: Cascade)
+
   // Notification content
-  title     String  // "New reply to your comment" or "New comment on your post"
-  message   String  // Detailed message with user names
-  type      String  // "comment_reply" | "post_comment" | "system"
-  
+  title   String // "New reply to your comment" or "New comment on your post"
+  message String // Detailed message with user names
+  type    String // "comment_reply" | "post_comment" | "system"
+
   // Related entity links for deep linking
   related_comment_id Int?
   related_post_id    Int?
   related_user_id    Int? // User who triggered the notification
-  
+
   // Status tracking
-  is_read   Boolean  @default(false)
+  is_read    Boolean  @default(false)
   created_at DateTime @default(now())
 
   @@index([user_id])
@@ -211,7 +209,6 @@ model notifications {
 
 /**
  * Media Assets - Cloudinary integration for image storage
- * 
  * Strategy:
  * - All images stored on Cloudinary, only metadata in DB
  * - Linked to posts for post-specific media
@@ -219,27 +216,27 @@ model notifications {
  * - Owner can only manage their own media
  */
 model media_assets {
-  id        Int       @id @default(autoincrement())
-  
+  id Int @id @default(autoincrement())
+
   // Cloudinary metadata
-  cloudinary_url    String   // Full Cloudinary URL
-  public_id         String   @unique // Cloudinary public ID for deletion
-  file_name         String
-  file_size         Int? // File size in bytes
-  mime_type         String? // e.g., image/jpeg
-  
+  cloudinary_url String // Full Cloudinary URL
+  public_id      String  @unique // Cloudinary public ID for deletion
+  file_name      String
+  file_size      Int? // File size in bytes
+  mime_type      String? // e.g., image/jpeg
+
   // Ownership and relations
-  user_id   Int
-  user      users     @relation(fields: [user_id], references: [id], onDelete: Cascade)
-  
+  user_id Int
+  user    users @relation(fields: [user_id], references: [id], onDelete: Cascade)
+
   // Optional link to post
-  post_id   Int?
-  post      posts?    @relation(fields: [post_id], references: [id], onDelete: SetNull)
-  
+  post_id Int?
+  post    posts? @relation(fields: [post_id], references: [id], onDelete: SetNull)
+
   // Metadata
-  alt_text  String?
-  metadata  Json?     @default("{}")
-  
+  alt_text String?
+  metadata Json?   @default("{}")
+
   created_at DateTime @default(now())
   updated_at DateTime @updatedAt
 
@@ -251,30 +248,28 @@ model media_assets {
 
 /**
  * User Activities - Contribution tracking (GitHub-style chart)
- * 
  * Strategy:
  * - Log every user action: POST_CREATED, POST_UPDATED, COMMENT_CREATED
  * - Index on (user_id, created_at) for efficient 365-day queries
  * - When fetching profile, group activities by day for the past 365 days
  * - Returns array: [{ date: "YYYY-MM-DD", count: number }]
- * 
  * Performance Note:
  * - MUST have composite index on (user_id, created_at) to handle millions of rows
  * - This index enables efficient range scans for 365-day queries
  */
 model user_activities {
-  id        Int              @id @default(autoincrement())
-  
-  user_id   Int
-  user      users            @relation(fields: [user_id], references: [id], onDelete: Cascade)
-  
+  id Int @id @default(autoincrement())
+
+  user_id Int
+  user    users @relation(fields: [user_id], references: [id], onDelete: Cascade)
+
   // Activity type
   activity_type UserActivityType
-  
+
   // Reference to related entity
-  post_id   Int?
+  post_id    Int?
   comment_id Int?
-  
+
   created_at DateTime @default(now())
 
   // Performance critical: composite index for 365-day queries
