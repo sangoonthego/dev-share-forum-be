@@ -43,6 +43,7 @@ export class TokenService {
       version: tokenVersion,
       jti,
       family,
+      csrf_token: csrfToken,
     };
 
     const rtPayload: JwtPayload = {

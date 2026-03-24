@@ -3,10 +3,6 @@ import { RedisService } from 'src/redis/redis.service';
 import { v4 as uuidv4 } from 'uuid';
 import { Request, Response } from 'express';
 
-/**
- * CSRF Protection Service
- * Double-submit CSRF token pattern (token in cookie + header validation)
- */
 @Injectable()
 export class CsrfService {
   private readonly CSRF_TOKEN_LIFESPAN = 15 * 60;
@@ -15,18 +11,10 @@ export class CsrfService {
 
   constructor(private redisService: RedisService) {}
 
-  /**
-   * Generate new CSRF token
-   * In production, stored in Redis for additional validation
-   */
   generateToken(): string {
     return uuidv4();
   }
 
-  /**
-   * Set CSRF token in response cookie
-   * Cookie accessible to JS so it can be sent in headers
-   */
   setTokenCookie(res: Response, token: string, isProduction: boolean = false): void {
     res.cookie(this.CSRF_COOKIE_NAME, token, {
       httpOnly: false, // JS-accessible for header injection
@@ -37,10 +25,6 @@ export class CsrfService {
     });
   }
 
-  /**
-   * Validate CSRF token from request header against cookie
-   * Only enforced in production; development allows any token
-   */
   validateToken(req: Request, isProduction: boolean = false): boolean {
     // Skip validation in development
     if (!isProduction) {
