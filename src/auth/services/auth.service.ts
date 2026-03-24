@@ -16,7 +16,7 @@ export class AuthService {
     private redisService: RedisService,
     private jwtService: JwtService,
     private userService: UserService,
-  ) {}
+  ) { }
 
   async hashData(data: string) {
     return bcrypt.hash(data, 10);
@@ -35,16 +35,6 @@ export class AuthService {
       throw new ForbiddenException('Refresh token missing family identifier');
     }
 
-    // Get stored RT hash from Redis using family
-    const storedHash = await this.tokenService.getRefreshTokenHashFromRedis(
-      userId,
-      decodedRt.family,
-    );
-
-    if (!storedHash) {
-      throw new ForbiddenException('Refresh token expired or revoked');
-    }
-
     const rtVerification = await this.tokenService.verifyRefreshToken(
       userId,
       rt,
@@ -52,15 +42,14 @@ export class AuthService {
     );
 
     if (rtVerification.reuseDetected) {
-      await this.tokenService.revokeAllTokens(userId);
-
+      await this.tokenService.invalidateRefreshToken(userId, decodedRt.family);
       throw new ForbiddenException(
-        'Token reuse detected - all sessions revoked. Please login again.',
+        'Token reuse detected - Family session revoked. Please login again.',
       );
     }
 
     if (!rtVerification.valid) {
-      throw new ForbiddenException('Invalid refresh token');
+      throw new UnauthorizedException('Refresh token missing or expired');
     }
 
     const user = await this.userService.findById(userId);
@@ -74,7 +63,7 @@ export class AuthService {
       user.email,
       user.role,
       user.token_version,
-      decodedRt.family
+      decodedRt.family // Pass the exact same family string
     );
 
     return tokens;
@@ -130,7 +119,7 @@ export class AuthService {
         user.id,
         user.email,
         user.role || 'USER',
-        user.token_version, 
+        user.token_version,
       );
 
       this.logger.debug(
@@ -140,7 +129,7 @@ export class AuthService {
       // Generate authorization code for secure code exchange
       const authorizationCode = uuidv4();
       const redisKey = `oauth_code:${authorizationCode}`;
-      
+
       // Store tokens in Redis with 5 minute TTL (300 seconds)
       const oauthCodeData = {
         access_token: tokens.access_token,
@@ -173,10 +162,10 @@ export class AuthService {
   async exchangeOAuthCode(authorizationCode: string): Promise<Tokens | null> {
     try {
       const redisKey = `oauth_code:${authorizationCode}`;
-      
+
       // Get tokens from Redis
       const storedData = await this.redisService.get(redisKey);
-      
+
       if (!storedData) {
         this.logger.warn(
           `[OAuth] Authorization code exchange failed: invalid or expired code`,

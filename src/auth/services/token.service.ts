@@ -83,15 +83,11 @@ export class TokenService {
     const hash = await bcrypt.hash(rt, 10);
 
     const familyKey = `rt:${userId}:${family}`;
-    const currentFamilyKey = `rt_family:${userId}`;
 
-    // Store RT hash with family
+    // Overwrite the RT hash for this standard family rotation
     await this.redisService.set(familyKey, hash, expiresIn);
 
-    // Track current family (for reuse detection)
-    await this.redisService.set(currentFamilyKey, family, expiresIn);
-
-    this.logger.debug(`Refresh token stored with family ${family} for user ${userId}`);
+    this.logger.debug(`Refresh token rotated / stored with family ${family} for user ${userId}`);
   }
 
   async getRefreshTokenHashFromRedis(
@@ -102,124 +98,32 @@ export class TokenService {
     return await this.redisService.get(familyKey);
   }
 
-  /**
-   * TRUE Atomic token rotation verification using Lua script
-   * Prevents TOCTOU Race Conditions by enforcing a "Check-and-Consume" lock.
-   */
-  async verifyRefreshTokenAtomic(
-    userId: number,
-    rt: string,
-    decodedFamily: string,
-  ): Promise<{ valid: boolean; shouldRotate: boolean; reuseDetected: boolean }> {
-    const familyKey = `rt:${userId}:${decodedFamily}`;
-    const currentFamilyKey = `rt_family:${userId}`;
-
-    // read current hash
-    const storedHash = await this.redisService.get(familyKey);
-
-    // check pass by bcrypt (Tốn CPU ~100ms)
-    // Lúc này Node.js thoải mái nhường Event Loop. Ta không block Redis.
-    if (storedHash) {
-      const hashValid = await bcrypt.compare(rt, storedHash);
-      if (!hashValid) {
-        this.logger.logSecurityEvent('Refresh token hash mismatch - possible token tampering', userId);
-        return { valid: false, shouldRotate: false, reuseDetected: false };
-      }
-    }
-
-    // (Atomic Check-and-Consume)
-    // Chỉ những request vượt qua được Bcrypt mới vào tới đây.
-    const script = `
-      local familyKey = KEYS[1]
-      local currentFamilyKey = KEYS[2]
-      local decodedFamily = ARGV[1]
-      local expectedHash = ARGV[2] -- Có thể rỗng nếu storedHash ban đầu là null
-
-      local currentFamily = redis.call('GET', currentFamilyKey)
-      local currentHash = redis.call('GET', familyKey)
-
-      -- 1. Family bị thay đổi -> Kẻ gian đang dùng Token cũ của một nhánh (Family) khác
-      if currentFamily and currentFamily ~= decodedFamily then
-        redis.call('DEL', familyKey)
-        return 0 -- REUSE DETECTED
-      end
-
-      -- 2. Race Condition (TOCTOU) Caught!
-      -- Phát hiện có kẻ "nẫng tay trên": Lúc đầu get có Hash, giờ Hash đã biến mất hoặc bị đổi 
-      -- do một request chạy song song vừa Consume nó.
-      if currentHash ~= expectedHash then
-        return 0 -- REUSE DETECTED
-      end
-
-      -- 3. Hợp lệ & Trúng đích (Winner of the race)
-      -- NGAY LẬP TỨC XÓA HASH để các request song song đến sau bị dính vào Case 2.
-      -- Hàm getTokens() sau đó sẽ tự động set lại Hash mới vào Redis.
-      if currentHash then
-        redis.call('DEL', familyKey)
-        return 1 -- SUCCESS
-      end
-
-      -- 4. Expired/Invalid (Không có hash từ đầu, nhưng không vi phạm reuse)
-      return 2
-    `;
-
-    try {
-      const redisClient = this.redisService.getClient();
-      // Truyền storedHash vào ARGV[2]. Dùng || '' để tránh lỗi khi storedHash null
-      const result = await redisClient.eval(
-        script,
-        2,
-        familyKey,
-        currentFamilyKey,
-        decodedFamily,
-        storedHash || ''
-      ) as number;
-
-      if (result === 0) {
-        this.logger.logSecurityEvent(
-          'Token reuse detected or Race Condition caught - triggering revocation',
-          userId,
-          { providedFamily: decodedFamily },
-        );
-        await this.revokeAllTokens(userId);
-        return {
-          valid: false,
-          shouldRotate: false,
-          reuseDetected: true,
-        };
-      }
-
-      if (result === 2 || !storedHash) {
-        return {
-          valid: false,
-          shouldRotate: false,
-          reuseDetected: false,
-        };
-      }
-
-      // result === 1 (Trường hợp duy nhất hợp lệ)
-      return {
-        valid: true,
-        shouldRotate: true,
-        reuseDetected: false,
-      };
-    } catch (error) {
-      this.logger.error('Atomic token verification failed', error);
-      throw new AuthException(
-        AuthErrorCode.REFRESH_FAILED,
-        403,
-        'Token verification failed',
-      );
-    }
-  }
-
   async verifyRefreshToken(
     userId: number,
     rt: string,
     decodedFamily: string,
-  ): Promise<{ valid: boolean; shouldRotate: boolean; reuseDetected: boolean }> {
-    // Delegate to atomic version for consistency
-    return this.verifyRefreshTokenAtomic(userId, rt, decodedFamily);
+  ): Promise<{ valid: boolean; reuseDetected: boolean }> {
+    const familyKey = `rt:${userId}:${decodedFamily}`;
+    const storedHash = await this.redisService.get(familyKey);
+
+    // If key not found, token is invalid but not necessarily reused against *this* hash check
+    if (!storedHash) {
+      return { valid: false, reuseDetected: false };
+    }
+
+    const hashValid = await bcrypt.compare(rt, storedHash);
+
+    // Key exists but token doesn't match: TOCTOU / Reuse Detection
+    if (!hashValid) {
+      this.logger.logSecurityEvent('Token reuse detected - revoking family', userId, { providedFamily: decodedFamily });
+      await this.redisService.del(familyKey); // Immediate revocation of this family
+      return { valid: false, reuseDetected: true };
+    }
+
+    await this.redisService.del(familyKey);
+
+    // Token matches, valid for rotation
+    return { valid: true, reuseDetected: false };
   }
 
   async invalidateRefreshToken(userId: number, oldFamily: string): Promise<void> {
