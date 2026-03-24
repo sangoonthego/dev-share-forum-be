@@ -87,6 +87,11 @@ export class TokenService {
     // Overwrite the RT hash for this standard family rotation
     await this.redisService.set(familyKey, hash, expiresIn);
 
+    // Add family to user's active families set
+    const userFamiliesKey = `user_families:${userId}`;
+    await (this.redisService as any).redis.sadd(userFamiliesKey, family);
+    await (this.redisService as any).redis.expire(userFamiliesKey, expiresIn);
+
     this.logger.debug(`Refresh token rotated / stored with family ${family} for user ${userId}`);
   }
 
@@ -149,24 +154,16 @@ export class TokenService {
   }
 
   async revokeAllTokens(userId: number): Promise<void> {
-    let cursor = '0';
-
     try {
-      do {
-        const [newCursor, keys] = await (this.redisService as any).redis.scan(
-          cursor,
-          'MATCH',
-          `rt:${userId}:*`,
-        );
-        cursor = newCursor;
+      const userFamiliesKey = `user_families:${userId}`;
+      const families = await (this.redisService as any).redis.smembers(userFamiliesKey);
 
-        if (keys && keys.length > 0) {
-          for (const key of keys) {
-            await this.redisService.del(key);
-          }
-        }
-      } while (cursor !== '0');
+      if (families && families.length > 0) {
+        const keysToDelete = families.map((family: string) => `rt:${userId}:${family}`);
+        await (this.redisService as any).redis.del(...keysToDelete);
+      }
 
+      await this.redisService.del(userFamiliesKey);
       await this.redisService.del(`rt_family:${userId}`);
 
       this.logger.logSecurityEvent(

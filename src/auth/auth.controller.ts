@@ -1,4 +1,4 @@
-import { Controller, Post, Body, HttpCode, HttpStatus, UseGuards, UseInterceptors, Res, Get, Req, ForbiddenException, UnauthorizedException, ConflictException, BadRequestException } from "@nestjs/common";
+import { Controller, Post, Body, HttpCode, HttpStatus, UseGuards, UseInterceptors, Res, Get, Req, ForbiddenException, UnauthorizedException, ConflictException, BadRequestException, Logger } from "@nestjs/common";
 import type { Response, Request } from "express";
 import { RegisterDto, LoginDto, ChangePasswordDto, UserProfileResponse, AuthResponse, OAuthUserResponse, ExchangeCodeDto, VerifyEmailDto, ResendVerificationDto, ForgotPasswordDto, ResetPasswordDto } from "./dto/auth.dto";
 import { RegisterService } from "./services/register.service";
@@ -22,6 +22,8 @@ import { AuthErrorCode, AuthException } from "./dto/auth-error.dto";
 @Controller('auth')
 @UseInterceptors(SentryTracingInterceptor)
 export class AuthController {
+  private readonly logger = new Logger(AuthController.name);
+
   constructor(
     private registerService: RegisterService,
     private loginService: LoginService,
@@ -184,12 +186,6 @@ export class AuthController {
   ) {
     const expiresIn = 15 * 60; // 15 minutes (match AT expiry)
 
-    if (user.jti) {
-      await this.authService.logout(user.jti, user.sub, expiresIn);
-    } else {
-      await this.authService.forceLogoutAllSessions(user.sub);
-    }
-
     // Clear both RT and CSRF cookies
     res.clearCookie('refresh_token', {
       httpOnly: true,
@@ -199,7 +195,13 @@ export class AuthController {
     });
     this.csrfService.clearToken(res);
 
-    return { success: true };
+    if (user.jti) {
+      this.authService.logout(user.jti, user.sub, expiresIn).catch((err) => this.logger.error('Logout cleanup failed', err));
+    } else {
+      this.authService.forceLogoutAllSessions(user.sub).catch((err) => this.logger.error('Logout cleanup failed', err));
+    }
+
+    return { success: true, message: 'Logged out successfully' };
   }
 
   @Public()
