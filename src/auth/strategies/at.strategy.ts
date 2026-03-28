@@ -31,7 +31,7 @@ export class AtStrategy extends PassportStrategy(Strategy, 'jwt') {
       }
     }
 
-    const user = await this.prisma.users.findUnique({
+    const user = await this.prisma.user.findUnique({
       where: { id: jwtPayload.sub },
       select: { token_version: true },
     });

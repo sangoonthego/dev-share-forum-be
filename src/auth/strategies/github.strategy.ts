@@ -12,8 +12,8 @@ export class GitHubStrategy extends PassportStrategy(Strategy, 'github') {
       clientSecret: process.env.GITHUB_CLIENT_SECRET,
       callbackURL: process.env.GITHUB_CALLBACK_URL,
       scope: ['user:email'],
-      state: true, // Enable state parameter for CSRF protection
-      passReqToCallback: true, // Get request for state validation
+      state: true, 
+      passReqToCallback: true, 
     });
   }
 

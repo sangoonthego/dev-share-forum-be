@@ -12,23 +12,19 @@ export class GoogleStrategy extends PassportStrategy(Strategy, 'google') {
       clientSecret: process.env.GOOGLE_CLIENT_SECRET,
       callbackURL: process.env.GOOGLE_CALLBACK_URL,
       scope: ['profile', 'email'],
-      state: true, // Enable state parameter for CSRF protection
-      passReqToCallback: true, // Get request for state validation
+      state: true, 
+      passReqToCallback: true, 
     });
   }
 
   async validate(
-    req: any, // request included due to passReqToCallback
+    req: any, 
     accessToken: string,
     refreshToken: string,
     profile: any,
     done: VerifyCallback,
   ): Promise<void> {
     try {
-      // Passport automatically validates state parameter
-      // If state is invalid, this method won't be called
-
-      // Extract profile data from Google
       const { id: googleId, emails, displayName, photos } = profile;
 
       const email = emails?.[0]?.value;
@@ -51,7 +47,6 @@ export class GoogleStrategy extends PassportStrategy(Strategy, 'google') {
         oauthProfile,
       );
 
-      // Pass user with tokens to controller
       done(null, userWithTokens);
     } catch (error) {
       done(error);

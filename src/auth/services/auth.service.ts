@@ -5,7 +5,7 @@ import * as bcrypt from 'bcrypt';
 import { TokenService } from "./token.service";
 import { JwtPayload, Tokens, OAuthProfile, OAuthUserResponse } from "../dto/auth.dto";
 import { RedisService } from "src/redis/redis.service";
-import { UserService } from "./user.service";
+import { UsersService } from "src/users/users.service";
 import { PrismaService } from "src/prisma/prisma.service";
 
 @Injectable()
@@ -16,7 +16,7 @@ export class AuthService {
     private tokenService: TokenService,
     private redisService: RedisService,
     private jwtService: JwtService,
-    private userService: UserService,
+    private usersService: UsersService,
     private prisma: PrismaService,
   ) { }
 
@@ -54,7 +54,7 @@ export class AuthService {
       throw new UnauthorizedException('Refresh token missing or expired');
     }
 
-    const user = await this.userService.findById(userId);
+    const user = await this.usersService.findById(userId);
 
     if (!user) {
       throw new ForbiddenException('User not found');
@@ -93,7 +93,7 @@ export class AuthService {
         `[OAuth] Validating ${oauthProfile.provider} user: ${oauthProfile.email}`,
       );
 
-      const existingUser = await this.userService.findByEmail(
+      const existingUser = await this.usersService.findByEmail(
         oauthProfile.email,
       );
 
@@ -104,7 +104,7 @@ export class AuthService {
           `[OAuth] Linking ${oauthProfile.provider} to existing user #${existingUser.id}`,
         );
 
-        user = await this.userService.updateOAuthProfile(
+        user = await this.usersService.updateOAuthProfile(
           existingUser.id,
           oauthProfile,
         );
@@ -114,7 +114,7 @@ export class AuthService {
           `[OAuth] Creating new user from ${oauthProfile.provider}`,
         );
 
-        user = await this.userService.createOAuthUser(oauthProfile);
+        user = await this.usersService.createOAuthUser(oauthProfile);
       }
 
       const tokens = await this.tokenService.getTokens(
@@ -209,7 +209,7 @@ export class AuthService {
 
     const userId = parseInt(userIdStr, 10);
 
-    await this.prisma.users.update({
+    await this.prisma.user.update({
       where: { id: userId },
       data: { is_verified: true },
     });
@@ -221,7 +221,7 @@ export class AuthService {
   async resendVerification(email: string): Promise<{ message: string }> {
     const successMessage = 'If your account exists and is unverified, a new link has been sent';
 
-    const user = await this.prisma.users.findUnique({
+    const user = await this.prisma.user.findUnique({
       where: { email },
     });
 
@@ -253,7 +253,7 @@ export class AuthService {
   async forgotPassword(email: string): Promise<{ message: string }> {
     const successMessage = 'If your email is registered, a reset link has been sent.';
 
-    const user = await this.prisma.users.findUnique({
+    const user = await this.prisma.user.findUnique({
       where: { email },
     });
 
@@ -298,7 +298,7 @@ export class AuthService {
     const userId = parseInt(userIdStr, 10);
     const passwordHash = await bcrypt.hash(newPassword, 10);
 
-    await this.prisma.users.update({
+    await this.prisma.user.update({
       where: { id: userId },
       data: {
         password_hash: passwordHash,

@@ -35,7 +35,7 @@ export class RtStrategy extends PassportStrategy(Strategy, 'jwt-refresh') {
 
     const jwtPayload = payload as JwtPayload;
 
-    const user = await this.prisma.users.findUnique({
+    const user = await this.prisma.user.findUnique({
       where: { id: jwtPayload.sub },
       select: { token_version: true },
     });

@@ -6,7 +6,7 @@ import { AuthService } from './services/auth.service';
 import { TokenService } from './services/token.service';
 import { LoginService } from './services/login.service';
 import { RegisterService } from './services/register.service';
-import { UserService } from './services/user.service';
+import { UsersModule } from "../users/users.module";
 import { LoginAuditService } from './services/login-audit.service';
 import { ChangePasswordService } from './services/change-password.service';
 import { CsrfService } from './services/csrf.service';
@@ -25,7 +25,7 @@ if (process.env.GITHUB_CLIENT_ID && process.env.GITHUB_CLIENT_SECRET) {
 }
 
 @Module({
-  imports: [
+  imports: [ UsersModule,
     PassportModule, 
     JwtModule.register({}),
   ],
@@ -35,7 +35,7 @@ if (process.env.GITHUB_CLIENT_ID && process.env.GITHUB_CLIENT_SECRET) {
     TokenService,
     LoginService,
     RegisterService,
-    UserService,
+    
     LoginAuditService,
     ChangePasswordService,
     CsrfService,
@@ -44,6 +44,6 @@ if (process.env.GITHUB_CLIENT_ID && process.env.GITHUB_CLIENT_SECRET) {
     LoggerService,
     ...oauthStrategies,
   ],
-  exports: [UserService, LoginAuditService], 
+  exports: [ LoginAuditService], 
 })
 export class AuthModule {}

@@ -4,7 +4,7 @@ import { RegisterDto, LoginDto, ChangePasswordDto, UserProfileResponse, AuthResp
 import { RegisterService } from "./services/register.service";
 import { LoginService } from "./services/login.service";
 import { AuthService } from "./services/auth.service";
-import { UserService } from "./services/user.service";
+import { UsersService } from "src/users/users.service";
 import { ChangePasswordService } from "./services/change-password.service";
 import { CsrfService } from "./services/csrf.service";
 import { AtGuard } from "src/common/guards/at.guard";
@@ -29,7 +29,7 @@ export class AuthController {
     private registerService: RegisterService,
     private loginService: LoginService,
     private authService: AuthService,
-    private userService: UserService,
+    private usersService: UsersService,
     private changePasswordService: ChangePasswordService,
     private csrfService: CsrfService,
   ) { }
@@ -248,8 +248,8 @@ export class AuthController {
   @UseGuards(AtGuard)
   @Get('me')
   @HttpCode(HttpStatus.OK)
-  async getMe(@User('sub') userId: number): Promise<UserProfileResponse> {
-    return this.userService.getUserProfile(userId);
+  async getMe(@User('sub') userId: number): Promise<any> {
+    return this.usersService.findById(userId);
   }
 
   @UseGuards(AtGuard, GlobalRateLimitGuard) // Rate limit password changes

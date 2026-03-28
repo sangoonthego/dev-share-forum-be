@@ -19,7 +19,7 @@ export class LoginService {
     ipAddress?: string,
     userAgent?: string,
   ): Promise<Tokens> {
-    const user = await this.prisma.users.findUnique({
+    const user = await this.prisma.user.findUnique({
       where: { email: dto.email },
     });
 

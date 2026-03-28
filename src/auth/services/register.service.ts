@@ -18,7 +18,7 @@ export class RegisterService {
   ) { }
 
   async execute(dto: RegisterDto): Promise<{ message: string }> {
-    const userExists = await this.prisma.users.findUnique({
+    const userExists = await this.prisma.user.findUnique({
       where: { email: dto.email },
     });
 
@@ -26,13 +26,18 @@ export class RegisterService {
 
     const passwordHash = await bcrypt.hash(dto.password, 10);
 
-    const newUser = await this.prisma.users.create({
+    const newUser = await this.prisma.user.create({
       data: {
         email: dto.email,
         password_hash: passwordHash,
-        full_name: dto.full_name,
         token_version: 1,
         is_verified: false,
+        profile: {
+          create: {
+            fullName: dto.full_name || null,
+            phone: dto.phone || null,
+          }
+        }
       },
     });
 

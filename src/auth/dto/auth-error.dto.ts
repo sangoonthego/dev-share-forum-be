@@ -1,7 +1,3 @@
-/**
- * Standard error codes for Auth module
- * Prevents information disclosure while providing client error mapping
- */
 export enum AuthErrorCode {
   INVALID_CREDENTIALS = 'AUTH_001',
   EMAIL_REGISTERED = 'AUTH_002',
@@ -21,9 +17,6 @@ export interface AuthErrorResponse {
   timestamp: string;
 }
 
-/**
- * Maps error codes to user-friendly messages (no implementation details)
- */
 export const ERROR_CODE_MESSAGES: Record<AuthErrorCode, string> = {
   [AuthErrorCode.INVALID_CREDENTIALS]: 'Invalid email or password',
   [AuthErrorCode.EMAIL_REGISTERED]: 'This email is already in use',

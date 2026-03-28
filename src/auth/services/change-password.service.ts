@@ -22,7 +22,7 @@ export class ChangePasswordService {
       );
     }
 
-    const user = await this.prisma.users.findUnique({
+    const user = await this.prisma.user.findUnique({
       where: { id: userId },
     });
 
@@ -41,7 +41,7 @@ export class ChangePasswordService {
 
     const newPasswordHash = await bcrypt.hash(dto.new_password, 10);
 
-    await this.prisma.users.update({
+    await this.prisma.user.update({
       where: { id: userId },
       data: {
         password_hash: newPasswordHash,
