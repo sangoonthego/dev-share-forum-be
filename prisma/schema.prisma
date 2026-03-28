@@ -29,7 +29,7 @@ model refresh_tokens {
   id         Int      @id @default(autoincrement())
   token      String   @unique // Hashed token
   user_id    Int      @unique
-  user       users    @relation(fields: [user_id], references: [id], onDelete: Cascade)
+  user       User     @relation(fields: [user_id], references: [id], onDelete: Cascade)
   expires_at DateTime
   is_revoked Boolean  @default(false)
   created_at DateTime @default(now())
@@ -38,22 +38,21 @@ model refresh_tokens {
   @@map("refresh_tokens")
 }
 
-model users {
-  id             Int      @id @default(autoincrement())
-  email          String   @unique
-  full_name      String?
-  password_hash  String
-  role           UserRole @default(USER)
-  phone          String?
-  profile_avatar String? // Avatar URL/path
-  karma          Int      @default(0)
-  token_version  Int      @default(1) // For password change revocation  
-  is_verified   Boolean   @default(false) // Email verification status  
-  is_banned      Boolean  @default(false) // Account ban status for anti-abuse
-  meta           Json?    @default("{}")
-  created_at     DateTime @default(now())
-  updated_at     DateTime @updatedAt
+model User {
+  id            Int      @id @default(autoincrement())
+  email         String   @unique
+  password_hash String   @map("password_hash")
+  role          UserRole @default(USER)
+  karma         Int      @default(0)
+  token_version Int      @default(1)
+  is_verified   Boolean  @default(false)
+  is_banned     Boolean  @default(false)
+  meta          Json?    @default("{}")
+  createdAt     DateTime @default(now()) @map("created_at")
+  updatedAt     DateTime @updatedAt @map("updated_at")
 
+  // Relations
+  profile         UserProfile?
   posts           posts[]
   comments        comments[]
   refresh_tokens  refresh_tokens[]
@@ -63,6 +62,38 @@ model users {
   user_activities user_activities[]
 
   @@map("users")
+}
+
+model UserProfile {
+  id     Int  @id @default(autoincrement())
+  userId Int  @unique @map("user_id")
+  user   User @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  fullName  String? @map("full_name")
+  phone     String?
+  headline  String?
+  bio       String? @db.Text
+  avatarUrl String? @map("avatar_url")
+  resumeUrl String? @map("resume_url")
+
+  githubUrl   String? @map("github_url")
+  linkedinUrl String? @map("linkedin_url")
+  websiteUrl  String? @map("website_url")
+
+  skills Skill[]
+
+  createdAt DateTime @default(now()) @map("created_at")
+  updatedAt DateTime @updatedAt @map("updated_at")
+
+  @@map("user_profiles")
+}
+
+model Skill {
+  id       Int           @id @default(autoincrement())
+  name     String        @unique
+  profiles UserProfile[]
+
+  @@map("skills")
 }
 
 model posts {
@@ -81,7 +112,7 @@ model posts {
   embedding Unsupported("vector(768)")?
 
   author_id Int
-  author    users @relation(fields: [author_id], references: [id])
+  author    User @relation(fields: [author_id], references: [id])
 
   created_at DateTime @default(now())
   updated_at DateTime @updatedAt
@@ -104,7 +135,7 @@ model comments {
   post    posts @relation(fields: [post_id], references: [id])
 
   author_id Int
-  author    users @relation(fields: [author_id], references: [id])
+  author    User @relation(fields: [author_id], references: [id])
 
   parent_id Int?
   parent    comments?  @relation("CommentReplies", fields: [parent_id], references: [id])
@@ -157,7 +188,7 @@ enum LoginStatus {
 model login_audits {
   id              Int         @id @default(autoincrement())
   user_id         Int? // Nullable - for failed login attempts
-  user            users?      @relation(fields: [user_id], references: [id], onDelete: SetNull)
+  user            User?       @relation(fields: [user_id], references: [id], onDelete: SetNull)
   status          LoginStatus @default(SUCCESS)
   ip_address      String?
   user_agent      String?
@@ -183,9 +214,9 @@ model login_audits {
  * - Archive: Notifications older than 30 days can be archived
  */
 model notifications {
-  id      Int   @id @default(autoincrement())
+  id      Int  @id @default(autoincrement())
   user_id Int
-  user    users @relation(fields: [user_id], references: [id], onDelete: Cascade)
+  user    User @relation(fields: [user_id], references: [id], onDelete: Cascade)
 
   // Notification content
   title   String // "New reply to your comment" or "New comment on your post"
@@ -227,7 +258,7 @@ model media_assets {
 
   // Ownership and relations
   user_id Int
-  user    users @relation(fields: [user_id], references: [id], onDelete: Cascade)
+  user    User @relation(fields: [user_id], references: [id], onDelete: Cascade)
 
   // Optional link to post
   post_id Int?
@@ -261,7 +292,7 @@ model user_activities {
   id Int @id @default(autoincrement())
 
   user_id Int
-  user    users @relation(fields: [user_id], references: [id], onDelete: Cascade)
+  user    User @relation(fields: [user_id], references: [id], onDelete: Cascade)
 
   // Activity type
   activity_type UserActivityType
