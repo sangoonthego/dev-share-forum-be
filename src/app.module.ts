@@ -11,6 +11,7 @@ import { MediaModule } from './media/media.module';
 import { UsersModule } from './users/users.module';
 import { QueueModule } from './queues/queue.module';
 import { AiModule } from './ai/ai.module';
+import { ProfilesModule } from './profiles/profiles.module';
 
 @Module({
   imports: [
@@ -24,6 +25,7 @@ import { AiModule } from './ai/ai.module';
     UsersModule,
     QueueModule,
     AiModule,
+    ProfilesModule,
   ],
   controllers: [AppController],
   providers: [AppService],

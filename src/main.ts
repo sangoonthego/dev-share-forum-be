@@ -8,7 +8,6 @@ import { GlobalExceptionFilter } from './common/filters/http-exception.filter';
 import { AtGuard } from './common/guards/at.guard';
 
 async function bootstrap() {
-  // Initialize Sentry for error tracking & distributed tracing
   if (process.env.SENTRY_DSN) {
     Sentry.init({
       dsn: process.env.SENTRY_DSN,
@@ -17,7 +16,6 @@ async function bootstrap() {
         Sentry.onUncaughtExceptionIntegration(),
         Sentry.onUnhandledRejectionIntegration(),
       ],
-      // Trace sampling
       tracesSampleRate: process.env.NODE_ENV === 'production' ? 0.1 : 1.0,
       environment: process.env.NODE_ENV,
     });
@@ -48,7 +46,7 @@ async function bootstrap() {
   app.useGlobalGuards(new AtGuard(reflector));
 
   app.enableCors({
-    origin: process.env.FRONTEND_URL || 'http://localhost:3001',
+    origin: process.env.FRONTEND_URL || ['http://localhost:8000', 'http://localhost:3001'],
     credentials: true,
     methods: ['GET', 'POST', 'PUT', 'DELETE', 'PATCH', 'OPTIONS'],
     allowedHeaders: ['Content-Type', 'Authorization', 'Accept', 'X-CSRF-Token', 'X-Trace-ID'],
