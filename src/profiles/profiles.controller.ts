@@ -45,7 +45,7 @@ export class ProfilesController {
   @Public()
   @Get(':id')
   async getUserProfile(@Param('id', ParseIntPipe) id: number) {
-    return this.profilesService.getProfileByUserId(id);
+    return this.profilesService.getPublicProfile(id);
   }
 }
 

@@ -57,7 +57,7 @@ export class ProfilesService {
                         id: true,
                         email: true,
                         role: true,
-                        
+
                         createdAt: true,
                     }
                 }
@@ -89,8 +89,8 @@ export class ProfilesService {
                 ...profileData,
                 skills: skills ? {
                     connectOrCreate: skills.map(skill => ({
-                        where: { name: skill },
-                        create: { name: skill }
+                        where: { name: skill.trim() },
+                        create: { name: skill.trim() }
                     }))
                 } : undefined
             },
@@ -99,8 +99,8 @@ export class ProfilesService {
                 skills: skills ? {
                     set: [], // Clear old skills entirely
                     connectOrCreate: skills.map(skill => ({
-                        where: { name: skill },
-                        create: { name: skill }
+                        where: { name: skill.trim() },
+                        create: { name: skill.trim() }
                     }))
                 } : undefined
             },
@@ -116,6 +116,39 @@ export class ProfilesService {
         });
 
         return updatedProfile;
+    }
+
+    async getPublicProfile(id: number) {
+        const user = await this.prisma.user.findUnique({
+            where: { id },
+            select: {
+                id: true,
+                karma: true,
+                createdAt: true,
+                profile: {
+                    include: { skills: true }
+                },
+                _count: {
+                    select: {
+                        posts: { where: { status: 'PUBLISHED', deleted_at: null } }
+                    }
+                }
+            }
+        });
+
+        if (!user) {
+            throw new NotFoundException('User profile not found');
+        }
+
+        // Flatten response slightly for a cleaner frontend experience
+        const { profile, _count, ...baseUser } = user;
+        return {
+            ...baseUser,
+            stats: {
+                publishedPosts: _count.posts
+            },
+            profile: profile || null
+        };
     }
 }
 
