@@ -1,4 +1,5 @@
-import { Controller, Get, Patch, Body, Param, ParseIntPipe, UseGuards } from '@nestjs/common';
+import { Controller, Get, Patch, Post, Body, Param, ParseIntPipe, UseGuards, UseInterceptors, UploadedFile, ParseFilePipe, MaxFileSizeValidator, FileTypeValidator } from '@nestjs/common';
+import { FileInterceptor } from '@nestjs/platform-express';
 import { ProfilesService } from './profiles.service';
 import { UpdateProfileDto } from './dto/update-profile.dto';
 import { User } from '../common/decorators/user.decorator';
@@ -9,6 +10,23 @@ import { Public } from '../common/decorators/public.decorator';
 @UseGuards(AtGuard)
 export class ProfilesController {
   constructor(private readonly profilesService: ProfilesService) {}
+
+  @Post('me/avatar')
+  @UseInterceptors(FileInterceptor('avatar'))
+  async uploadMyAvatar(
+    @User('sub') userId: number,
+    @UploadedFile(
+      new ParseFilePipe({
+        validators: [
+          new MaxFileSizeValidator({ maxSize: 5 * 1024 * 1024 }), // 5MB limit
+          new FileTypeValidator({ fileType: /(jpg|jpeg|png|webp)$/ }),
+        ],
+      }),
+    )
+    avatar: Express.Multer.File,
+  ) {
+    return this.profilesService.uploadAvatar(userId, avatar);
+  }
 
   @Get('me/profile')
   async getMyProfile(@User('sub') userId: number) {

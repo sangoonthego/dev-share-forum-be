@@ -1,10 +1,51 @@
 import { Injectable, NotFoundException } from '@nestjs/common';
 import { PrismaService } from '../prisma/prisma.service';
 import { UpdateProfileDto } from './dto/update-profile.dto';
+import { CloudinaryService } from '../media/cloudinary.service';
 
 @Injectable()
 export class ProfilesService {
-    constructor(private readonly prisma: PrismaService) { }
+    constructor(
+        private readonly prisma: PrismaService,
+        private readonly cloudinaryService: CloudinaryService
+    ) { }
+
+    async uploadAvatar(userId: number, file: Express.Multer.File) {
+        // Step 1: Fetch user's current profile
+        const profile = await this.getProfileByUserId(userId);
+        const currentAvatarUrl = (profile as any).avatarUrl; // or any specific type
+
+        // Step 2: Delete orphaned file if exists
+        if (currentAvatarUrl && currentAvatarUrl.includes('cloudinary.com')) {
+            const matches = currentAvatarUrl.match(/\/v\d+\/(devshare\/avatars\/.*?)(?:\.[a-z]+)?$/i);
+            if (matches && matches[1]) {
+                const publicId = matches[1];
+                await this.cloudinaryService.deleteImage(publicId).catch((err) => {
+                    console.warn(`Failed to delete legacy avatar on Cloudinary for user ${userId}:`, err.message);
+                });
+            }
+        }
+
+        // Step 3: Upload new avatar
+        const result = await this.cloudinaryService.uploadImage(file, 'devshare/avatars');
+
+        // Step 4: Update profile with new avatar URL
+        const updatedProfile = await this.prisma.userProfile.upsert({
+            where: { userId },
+            create: {
+                userId,
+                avatarUrl: result.url,
+            },
+            update: {
+                avatarUrl: result.url,
+            },
+            include: {
+                skills: true,
+            },
+        });
+
+        return updatedProfile;
+    }
 
     async getProfileByUserId(userId: number) {
         const profile = await this.prisma.userProfile.findUnique({
