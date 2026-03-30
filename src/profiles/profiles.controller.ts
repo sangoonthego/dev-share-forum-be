@@ -29,12 +29,12 @@ export class ProfilesController {
     return this.profilesService.uploadAvatar(userId, avatar);
   }
 
-  @Get('me/profile')
+  @Get('me')
   async getMyProfile(@User('sub') userId: number) {
     return this.profilesService.getProfileByUserId(userId);
   }
 
-  @Patch('me/profile')
+  @Patch('me')
   async updateMyProfile(
     @User('sub') userId: number,
     @Body() updateProfileDto: UpdateProfileDto,
@@ -43,7 +43,7 @@ export class ProfilesController {
   }
 
   @Public()
-  @Get(':id/profile')
+  @Get(':id')
   async getUserProfile(@Param('id', ParseIntPipe) id: number) {
     return this.profilesService.getProfileByUserId(id);
   }

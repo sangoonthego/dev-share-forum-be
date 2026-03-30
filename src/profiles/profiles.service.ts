@@ -82,35 +82,36 @@ export class ProfilesService {
     async updateProfile(userId: number, dto: UpdateProfileDto) {
         const { skills, ...profileData } = dto;
 
-        // Handle skills Many-to-Many relation if provided
-        const skillsConnectOrCreate = skills?.map(skillName => ({
-            where: { name: skillName },
-            create: { name: skillName },
-        }));
-
-        const updateData: any = {
-            ...profileData,
-        };
-
-        if (skillsConnectOrCreate) {
-            updateData.skills = {
-                set: [], // clears existing skills to replace with new ones, or sync them
-                connectOrCreate: skillsConnectOrCreate,
-            };
-        }
-
         const updatedProfile = await this.prisma.userProfile.upsert({
             where: { userId },
             create: {
                 userId,
                 ...profileData,
-                skills: {
-                    connectOrCreate: skillsConnectOrCreate || [],
-                },
+                skills: skills ? {
+                    connectOrCreate: skills.map(skill => ({
+                        where: { name: skill },
+                        create: { name: skill }
+                    }))
+                } : undefined
             },
-            update: updateData,
+            update: {
+                ...profileData,
+                skills: skills ? {
+                    set: [], // Clear old skills entirely
+                    connectOrCreate: skills.map(skill => ({
+                        where: { name: skill },
+                        create: { name: skill }
+                    }))
+                } : undefined
+            },
             include: {
                 skills: true,
+                user: {
+                    select: {
+                        id: true,
+                        email: true,
+                    },
+                },
             },
         });
 

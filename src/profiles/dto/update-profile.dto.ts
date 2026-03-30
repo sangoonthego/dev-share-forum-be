@@ -22,14 +22,17 @@ export class UpdateProfileDto {
   bio?: string;
 
   @IsOptional()
+  @IsString()
   @IsUrl()
   githubUrl?: string;
 
   @IsOptional()
+  @IsString()
   @IsUrl()
   linkedinUrl?: string;
 
   @IsOptional()
+  @IsString()
   @IsUrl()
   websiteUrl?: string;
 
