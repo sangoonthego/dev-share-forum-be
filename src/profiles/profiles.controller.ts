@@ -5,11 +5,12 @@ import { UpdateProfileDto } from './dto/update-profile.dto';
 import { User } from '../common/decorators/user.decorator';
 import { AtGuard } from '../common/guards/at.guard';
 import { Public } from '../common/decorators/public.decorator';
+import { CustomImageValidator } from 'src/common/validators/custom-image.validator';
 
-@Controller('users')
+@Controller('profiles')
 @UseGuards(AtGuard)
 export class ProfilesController {
-  constructor(private readonly profilesService: ProfilesService) {}
+  constructor(private readonly profilesService: ProfilesService) { }
 
   @Post('me/avatar')
   @UseInterceptors(FileInterceptor('avatar'))
@@ -18,8 +19,8 @@ export class ProfilesController {
     @UploadedFile(
       new ParseFilePipe({
         validators: [
-          new MaxFileSizeValidator({ maxSize: 5 * 1024 * 1024 }), // 5MB limit
-          new FileTypeValidator({ fileType: /(jpg|jpeg|png|webp)$/ }),
+          new MaxFileSizeValidator({ maxSize: 5 * 1024 * 1024 }),
+          new CustomImageValidator({}),
         ],
       }),
     )
