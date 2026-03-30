@@ -28,7 +28,7 @@ export class PostsService {
     private cloudinaryService: CloudinaryService,
     private userActivityService: UserActivityService,
     private embeddingService: EmbeddingService,
-  ) {}
+  ) { }
 
   async createPost(
     userId: number,
@@ -48,7 +48,7 @@ export class PostsService {
       this.logger.error(
         `[POSTS] Failed to generate embedding: ${error instanceof Error ? error.message : 'Unknown error'}. Post creation will continue without embedding.`,
       );
-      
+
     }
 
     const post = await this.prisma.$transaction(async (tx) => {
@@ -316,17 +316,19 @@ export class PostsService {
   async getPostBySlug(slug: string, userRole?: string): Promise<PostResponseDto> {
     const cacheKey = `post:slug:${slug}`;
 
-    // 1. Check Redis cache
-    const cached = await this.redis.get(cacheKey);
-    if (cached) {
-      // Increment view count (fire and forget)
-      this._incrementViewCount(slug).catch((err) =>
-        console.error('Failed to increment view count:', err),
-      );
-      return JSON.parse(cached);
+    // 1. Check Redis cache (Bypass for ADMIN)
+    if (userRole !== 'ADMIN') {
+      const cached = await this.redis.get(cacheKey);
+      if (cached) {
+        // Increment view count (fire and forget)
+        this._incrementViewCount(slug).catch((err) =>
+          console.error('Failed to increment view count:', err),
+        );
+        return JSON.parse(cached);
+      }
     }
 
-    // 2. Query database with soft delete filter
+    // 2. Query database
     const post = await this.prisma.posts.findUnique({
       where: { slug },
       include: {
@@ -334,7 +336,7 @@ export class PostsService {
           select: {
             id: true,
             email: true,
-            full_name: true,
+            profile: { select: { fullName: true } },
           },
         },
         posts_tags: {
@@ -349,19 +351,18 @@ export class PostsService {
       throw new NotFoundException('Post not found');
     }
 
-    // 3. Check if post is soft-deleted and user is not ADMIN
-    if (post.deleted_at !== null && userRole !== 'ADMIN') {
-      throw new NotFoundException('Post not found');
+    // 3. Access Control
+    if (userRole !== 'ADMIN') {
+      if (post.status !== 'PUBLISHED' || post.deleted_at !== null) {
+        // Obscure the exact reason (soft-deleted or draft) from non-admins
+        throw new NotFoundException('Post not found');
+      }
     }
 
-    // 3b. Check if post is DRAFT - only author can view
-    if (post.status === 'DRAFT' && userRole !== 'ADMIN') {
-      throw new ForbiddenException('Cannot access draft posts');
-    }
-
-    // 4. Cache for 1 hour (3600 seconds) - but NOT drafts
     const formatted = this._formatPostResponse(post);
-    if (post.status === 'PUBLISHED') {
+
+    // 4. Secure Cache Writing: Only cache if public and not soft-deleted
+    if (post.status === 'PUBLISHED' && post.deleted_at === null) {
       await this.redis.set(cacheKey, JSON.stringify(formatted), 3600);
     }
 
@@ -388,8 +389,8 @@ export class PostsService {
 
     // Build where clause - exclude soft-deleted for non-ADMIN, exclude DRAFT posts
     const whereClause: any = {
-      deleted_at: null, 
-      status: 'PUBLISHED', 
+      deleted_at: null,
+      status: 'PUBLISHED',
     };
     if (isPublished) {
       whereClause.is_published = true;
@@ -407,7 +408,7 @@ export class PostsService {
             select: {
               id: true,
               email: true,
-              full_name: true,
+              profile: { select: { fullName: true } },
             },
           },
           posts_tags: {
@@ -496,9 +497,9 @@ export class PostsService {
     return text
       .toLowerCase()
       .trim()
-      .replace(/[^\w\s-]/g, '') 
-      .replace(/[\s_-]+/g, '-') 
-      .replace(/^-+|-+$/g, ''); 
+      .replace(/[^\w\s-]/g, '')
+      .replace(/[\s_-]+/g, '-')
+      .replace(/^-+|-+$/g, '');
   }
 
   private _formatPostResponse(post: any): PostResponseDto {
@@ -514,7 +515,7 @@ export class PostsService {
         author: {
           id: post.author.id,
           email: post.author.email,
-          full_name: post.author.full_name,
+          full_name: post.author.profile?.fullName || null,
         },
       }),
       ...(post.posts_tags && {
@@ -524,8 +525,8 @@ export class PostsService {
           slug: pt.tag.slug,
         })),
       }),
-      created_at: post.created_at,
-      updated_at: post.updated_at,
+      created_at: post.createdAt,
+      updated_at: post.updatedAt,
     };
   }
 
@@ -546,7 +547,7 @@ export class PostsService {
     userRole?: string,
     userId?: number,
     limit: number = 5,
-    similarityThreshold: number = 1.0, 
+    similarityThreshold: number = 1.0,
   ): Promise<PostResponseDto[]> {
     // Validate query
     if (!query || query.trim().length === 0) {
@@ -576,7 +577,7 @@ export class PostsService {
     // 3. Execute vector search using pgvector cosine distance with threshold filter
     const embeddingString = JSON.stringify(queryEmbedding);
     const limitInt = Math.max(1, Math.min(limit, 100)); // Clamp between 1-100 for safety
-    
+
     const sql = `
       SELECT 
         p.id,
@@ -629,7 +630,7 @@ export class PostsService {
           select: {
             id: true,
             email: true,
-            full_name: true,
+            profile: { select: { fullName: true } },
           },
         },
         posts_tags: {
