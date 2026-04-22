@@ -1,4 +1,4 @@
-import { IsInt, Min, Max, IsOptional } from 'class-validator';
+import { IsInt, Min, Max, IsOptional, IsString } from 'class-validator';
 import { Type } from 'class-transformer';
 
 export class GetPostsFilterDto {
@@ -14,4 +14,13 @@ export class GetPostsFilterDto {
     @Min(1)
     @Max(50)
     limit: number = 10;
+
+    @IsOptional()
+    @IsString()
+    tag?: string;
+
+    @IsOptional()
+    @Type(() => Number)
+    @IsInt()
+    authorId?: number;
 }

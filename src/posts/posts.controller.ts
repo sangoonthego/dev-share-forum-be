@@ -46,7 +46,25 @@ export class PostsController {
   async getPosts(
     @Query() filter: GetPostsFilterDto,
   ): Promise<PaginatedPostsResponseDto> {
-    return this.postsService.getPostsPaginated(filter.page, filter.limit, true);
+    return this.postsService.getPostsPaginated(filter.page, filter.limit, true, undefined, filter.tag, filter.authorId);
+  }
+
+  @Get('me')
+  @UseGuards(AtGuard)
+  async getMyPosts(
+    @User('sub') userId: number,
+    @Query() filter: GetPostsFilterDto,
+  ): Promise<PaginatedPostsResponseDto> {
+    return this.postsService.getMyPosts(userId, filter.page, filter.limit);
+  }
+
+  @Get('me/:id')
+  @UseGuards(AtGuard)
+  async getMyPostById(
+    @User('sub') userId: number,
+    @Param('id') id: string,
+  ): Promise<PostResponseDto> {
+    return this.postsService.getMyPostById(Number(id), userId);
   }
 
   @Get('search/semantic')
@@ -80,6 +98,26 @@ export class PostsController {
     @User('sub') userId: number,
   ): Promise<PostResponseDto> {
     return this.postsService.updatePost(Number(id), userId, dto);
+  }
+
+  @Patch(':id/autosave')
+  @UseGuards(AtGuard)
+  async autoSavePost(
+    @Param('id') id: string,
+    @Body() dto: Partial<UpdatePostDto>,
+    @User('sub') userId: number,
+  ): Promise<{ success: boolean; updatedAt: Date }> {
+    return this.postsService.autoSavePost(Number(id), userId, dto);
+  }
+
+  @Post(':id/restore')
+  @HttpCode(HttpStatus.OK)
+  @UseGuards(AtGuard)
+  async restorePost(
+    @Param('id') id: string,
+    @User('sub') userId: number,
+  ): Promise<PostResponseDto> {
+    return this.postsService.restorePost(Number(id), userId);
   }
 
   @Post('embeddings/backfill')

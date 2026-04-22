@@ -313,6 +313,90 @@ export class PostsService {
     await this._invalidateListCaches();
   }
 
+  async restorePost(postId: number, userId: number): Promise<PostResponseDto> {
+    const post = await this.prisma.posts.findUnique({
+      where: { id: postId },
+      include: {
+        author: {
+          select: {
+            id: true,
+            email: true,
+            profile: { select: { fullName: true } },
+          },
+        },
+        posts_tags: {
+          include: { tag: true }
+        }
+      }
+    });
+
+    if (!post) {
+      throw new NotFoundException('Post not found');
+    }
+
+    if (post.author_id !== userId) {
+      throw new ForbiddenException('Cannot restore other users posts');
+    }
+
+    if (post.deleted_at === null) {
+      throw new BadRequestException('Post is not deleted');
+    }
+
+    const restoredPost = await this.prisma.posts.update({
+      where: { id: postId },
+      data: { deleted_at: null },
+      include: {
+        author: {
+          select: {
+            id: true,
+            email: true,
+            profile: { select: { fullName: true } },
+          },
+        },
+        posts_tags: {
+          include: { tag: true }
+        }
+      }
+    });
+
+    await this._invalidateListCaches();
+    return this._formatPostResponse(restoredPost);
+  }
+
+  async autoSavePost(postId: number, userId: number, dto: Partial<UpdatePostDto>): Promise<{ success: boolean; updatedAt: Date }> {
+    const post = await this.prisma.posts.findUnique({
+      where: { id: postId },
+      select: { id: true, author_id: true }
+    });
+
+    if (!post) {
+      throw new NotFoundException('Post not found');
+    }
+
+    if (post.author_id !== userId) {
+      throw new ForbiddenException('Cannot modify other users posts');
+    }
+
+    const updateData: any = {};
+    if (dto.title) updateData.title = dto.title;
+    if (dto.content_markdown) updateData.content_markdown = DOMPurify.sanitize(dto.content_markdown);
+
+    if (Object.keys(updateData).length === 0) {
+      return { success: true, updatedAt: new Date() };
+    }
+
+    const updatedPost = await this.prisma.posts.update({
+      where: { id: postId },
+      data: updateData,
+      select: { updated_at: true }
+    });
+
+    return {
+      success: true,
+      updatedAt: updatedPost.updated_at
+    };
+  }
+
   async getPostBySlug(slug: string, userRole?: string): Promise<PostResponseDto> {
     const cacheKey = `post:slug:${slug}`;
 
@@ -377,9 +461,11 @@ export class PostsService {
     limit: number = 10,
     isPublished: boolean = true,
     userRole?: string,
+    tag?: string,
+    authorId?: number,
   ): Promise<PaginatedPostsResponseDto> {
     const skip = (page - 1) * limit;
-    const cacheKey = `posts:list:page:${page}:limit:${limit}:published:${isPublished}:role:${userRole || 'guest'}`;
+    const cacheKey = `posts:list:page:${page}:limit:${limit}:published:${isPublished}:role:${userRole || 'guest'}:tag:${tag || 'all'}:author:${authorId || 'all'}`;
 
     // Try cache
     const cached = await this.redis.get(cacheKey);
@@ -394,6 +480,18 @@ export class PostsService {
     };
     if (isPublished) {
       whereClause.is_published = true;
+    }
+    if (tag) {
+      whereClause.posts_tags = {
+        some: {
+          tag: {
+            slug: tag,
+          },
+        },
+      };
+    }
+    if (authorId) {
+      whereClause.author_id = authorId;
     }
     // Note: ADMIN users can still see DRAFT via dedicated endpoint
 
@@ -437,6 +535,71 @@ export class PostsService {
     await this.redis.set(cacheKey, JSON.stringify(response), 300);
 
     return response;
+  }
+
+  async getMyPosts(userId: number, page: number = 1, limit: number = 10): Promise<PaginatedPostsResponseDto> {
+    const skip = (page - 1) * limit;
+
+    const [posts, total] = await Promise.all([
+      this.prisma.posts.findMany({
+        where: { author_id: userId },
+        skip,
+        take: limit,
+        include: {
+          author: {
+            select: {
+              id: true,
+              email: true,
+              profile: { select: { fullName: true } },
+            },
+          },
+          posts_tags: {
+            include: { tag: true },
+          },
+        },
+        orderBy: { created_at: 'desc' },
+      }),
+      this.prisma.posts.count({
+        where: { author_id: userId },
+      }),
+    ]);
+
+    const totalPages = Math.ceil(total / limit);
+    return {
+      data: posts.map((p) => this._formatPostResponse(p)),
+      total,
+      page,
+      limit,
+      totalPages,
+    };
+  }
+
+  async getMyPostById(postId: number, userId: number): Promise<PostResponseDto> {
+    const post = await this.prisma.posts.findUnique({
+      where: { id: postId },
+      include: {
+        author: {
+          select: {
+            id: true,
+            email: true,
+            profile: { select: { fullName: true } },
+          },
+        },
+        posts_tags: {
+          include: { tag: true },
+        },
+      },
+    });
+
+    if (!post) {
+      throw new NotFoundException('Post not found');
+    }
+
+    if (post.author_id !== userId) {
+      throw new ForbiddenException('Cannot access other users posts');
+    }
+
+    return this._formatPostResponse(post);
   }
 
   private async generateUniqueSlug(
