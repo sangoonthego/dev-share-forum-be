@@ -7,6 +7,7 @@ import {
   InternalServerErrorException,
   Logger,
 } from '@nestjs/common';
+import { Cron, CronExpression } from '@nestjs/schedule';
 import { PrismaService } from 'src/prisma/prisma.service';
 import { RedisService } from 'src/redis/redis.service';
 import { CloudinaryService } from 'src/media/cloudinary.service';
@@ -35,7 +36,7 @@ export class PostsService {
     dto: CreatePostDto,
   ): Promise<PostResponseDto> {
     const sanitizedContent = DOMPurify.sanitize(dto.content_markdown);
-    const slug = await this.generateUniqueSlug(dto.title);
+    let slug = await this.generateUniqueSlug(dto.title);
 
     let embedding: number[] = [];
     try {
@@ -48,47 +49,76 @@ export class PostsService {
       this.logger.error(
         `[POSTS] Failed to generate embedding: ${error instanceof Error ? error.message : 'Unknown error'}. Post creation will continue without embedding.`,
       );
-
     }
 
-    const post = await this.prisma.$transaction(async (tx) => {
-      const newPost = await tx.posts.create({
-        data: {
-          title: dto.title,
-          slug,
-          content_markdown: sanitizedContent,
-          is_published: dto.is_published || false,
-          status: dto.status || 'PUBLISHED', // Default to PUBLISHED, can be DRAFT
-          author_id: userId,
-          // Note: embedding saved separately after transaction (see step 5)
-        },
-      });
+    let post: any;
+    let attempts = 0;
+    const maxAttempts = 3;
 
-      // Handle tags: find or create, then connect
-      if (dto.tags && dto.tags.length > 0) {
-        for (const tagName of dto.tags) {
-          // Find or create tag
-          const tag = await tx.tags.upsert({
-            where: { name: tagName },
-            update: {}, // No update needed if exists
-            create: {
-              name: tagName,
-              slug: this._slugify(tagName),
-            },
-          });
-
-          // Connect tag to post
-          await tx.posts_tags.create({
+    while (attempts < maxAttempts) {
+      try {
+        post = await this.prisma.$transaction(async (tx) => {
+          const newPost = await tx.posts.create({
             data: {
-              post_id: newPost.id,
-              tag_id: tag.id,
+              title: dto.title,
+              slug,
+              content_markdown: sanitizedContent,
+              is_published: dto.is_published || false,
+              status: dto.status || 'PUBLISHED', // Default to PUBLISHED, can be DRAFT
+              author_id: userId,
+              // Note: embedding saved separately after transaction (see step 5)
             },
           });
-        }
-      }
 
-      return newPost;
-    });
+          // Handle tags: find or create, then connect
+          if (dto.tags && dto.tags.length > 0) {
+            for (const tagName of dto.tags) {
+              // Find or create tag
+              const tag = await tx.tags.upsert({
+                where: { name: tagName },
+                update: {}, // No update needed if exists
+                create: {
+                  name: tagName,
+                  slug: this._slugify(tagName),
+                },
+              });
+
+              // Connect tag to post
+              await tx.posts_tags.create({
+                data: {
+                  post_id: newPost.id,
+                  tag_id: tag.id,
+                },
+              });
+            }
+          }
+
+          return newPost;
+        });
+        break; // Successful transaction
+      } catch (error: any) {
+        // Feature 2: Race condition fix
+        if (error.code === 'P2002' && error.meta?.target?.includes('slug')) {
+          attempts++;
+          if (attempts >= maxAttempts) {
+            throw new ConflictException('Could not generate unique slug automatically.');
+          }
+          slug = `${this._slugify(dto.title)}-${nanoid(10)}`;
+          continue; // Retry block
+        }
+
+        // Feature 3: Orphaned Media fallback cleanup
+        if ((dto as any).media_assets && Array.isArray((dto as any).media_assets)) {
+          for (const media of (dto as any).media_assets) {
+            // Delete image fire and forget
+            const publicId = typeof media === 'string' ? media : media.public_id;
+            if (publicId) this.cloudinaryService.deleteImage(publicId).catch(console.error);
+          }
+        }
+
+        throw error;
+      }
+    }
 
     if (embedding.length > 0) {
       try {
@@ -184,47 +214,58 @@ export class PostsService {
     // Handle tags if provided
     let updatedPost: any;
 
-    if (dto.tags && dto.tags.length >= 0) {
-      updatedPost = await this.prisma.$transaction(async (tx) => {
-        // Update post
-        const post = await tx.posts.update({
+    try {
+      if (dto.tags && dto.tags.length >= 0) {
+        updatedPost = await this.prisma.$transaction(async (tx) => {
+          // Update post
+          const post = await tx.posts.update({
+            where: { id: postId },
+            data: updateData,
+          });
+
+          // Clear old tags
+          await tx.posts_tags.deleteMany({
+            where: { post_id: postId },
+          });
+
+          // Add new tags
+          if (dto.tags && dto.tags.length > 0) {
+            for (const tagName of dto.tags) {
+              const tag = await tx.tags.upsert({
+                where: { name: tagName },
+                update: {},
+                create: {
+                  name: tagName,
+                  slug: this._slugify(tagName),
+                },
+              });
+
+              await tx.posts_tags.create({
+                data: {
+                  post_id: post.id,
+                  tag_id: tag.id,
+                },
+              });
+            }
+          }
+
+          return post;
+        });
+      } else {
+        updatedPost = await this.prisma.posts.update({
           where: { id: postId },
           data: updateData,
         });
-
-        // Clear old tags
-        await tx.posts_tags.deleteMany({
-          where: { post_id: postId },
-        });
-
-        // Add new tags
-        if (dto.tags && dto.tags.length > 0) {
-          for (const tagName of dto.tags) {
-            const tag = await tx.tags.upsert({
-              where: { name: tagName },
-              update: {},
-              create: {
-                name: tagName,
-                slug: this._slugify(tagName),
-              },
-            });
-
-            await tx.posts_tags.create({
-              data: {
-                post_id: post.id,
-                tag_id: tag.id,
-              },
-            });
-          }
+      }
+    } catch (error: any) {
+      // Feature 3: Orphaned Media fallback cleanup
+      if ((dto as any).media_assets && Array.isArray((dto as any).media_assets)) {
+        for (const media of (dto as any).media_assets) {
+          const publicId = typeof media === 'string' ? media : media.public_id;
+          if (publicId) this.cloudinaryService.deleteImage(publicId).catch(console.error);
         }
-
-        return post;
-      });
-    } else {
-      updatedPost = await this.prisma.posts.update({
-        where: { id: postId },
-        data: updateData,
-      });
+      }
+      throw error;
     }
 
     // Save new embedding if regenerated
@@ -634,18 +675,33 @@ export class PostsService {
   }
 
   /**
-   * Increment view count atomically
-   * Uses Prisma increment to avoid race conditions
+   * Increment view count using Redis for performance
    */
   private async _incrementViewCount(slug: string): Promise<void> {
-    await this.prisma.posts.update({
-      where: { slug },
-      data: {
-        view_count: {
-          increment: 1,
-        },
-      },
+    await this.redis.hIncrBy('posts:pending_views', slug, 1);
+  }
+
+  @Cron(CronExpression.EVERY_5_MINUTES)
+  async flushViewCounts(): Promise<void> {
+    const views = await this.redis.hGetAll('posts:pending_views');
+    if (!views || Object.keys(views).length === 0) {
+      return;
+    }
+
+    // Clear hash immediately
+    await this.redis.unlink('posts:pending_views');
+
+    const updatePromises = Object.entries(views).map(([slug, countStr]) => {
+      const count = parseInt(countStr as string, 10);
+      if (isNaN(count)) return null;
+      return this.prisma.posts.update({
+        where: { slug },
+        data: { view_count: { increment: count } },
+      });
     });
+
+    await Promise.allSettled(updatePromises.filter(p => p !== null));
+    this.logger.debug(`[CRON] Flushed ${updatePromises.length} pending view counts to database.`);
   }
 
   private _generateEmbedding(content: string): number[] {

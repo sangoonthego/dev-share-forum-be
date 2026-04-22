@@ -6,6 +6,7 @@ export class GetPostsFilterDto {
     @Type(() => Number)
     @IsInt()
     @Min(1)
+    @Max(100)
     page: number = 1;
 
     @IsOptional()
