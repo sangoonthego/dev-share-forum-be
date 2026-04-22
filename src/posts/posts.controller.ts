@@ -18,6 +18,7 @@ import { Request } from 'express';
 import { PostsService } from './posts.service';
 import { CreatePostDto } from './dto/create-post.dto';
 import { UpdatePostDto } from './dto/update-post.dto';
+import { GetPostsFilterDto } from './dto/get-posts-filter.dto';
 import { PostResponseDto, PaginatedPostsResponseDto } from './dto/post-response.dto';
 import { AtGuard } from 'src/common/guards/at.guard';
 import { OwnershipGuard } from './guards/ownership.guard';
@@ -27,12 +28,12 @@ import type { JwtPayload } from 'src/auth/dto/auth.dto';
 
 @Controller('posts')
 export class PostsController {
-  constructor(private postsService: PostsService) {}
+  constructor(private postsService: PostsService) { }
 
   @Post()
   @HttpCode(HttpStatus.CREATED)
   @UseGuards(AtGuard)
-  @Throttle({ default: { limit: 10, ttl: 3600 } }) 
+  @Throttle({ default: { limit: 10, ttl: 3600 } })
   async createPost(
     @User('sub') userId: number,
     @Body() dto: CreatePostDto,
@@ -42,20 +43,10 @@ export class PostsController {
 
   @Get()
   @Public()
-  @UseGuards(AtGuard) 
-  async getPostsPaginated(
-    @Query('page') page?: string,
-    @Query('limit') limit?: string,
-    @Query('all') all?: string,
-    @User('sub') userId?: number,
-    @User('role') userRole?: string,
+  async getPosts(
+    @Query() filter: GetPostsFilterDto,
   ): Promise<PaginatedPostsResponseDto> {
-    const pageNum = Math.max(1, parseInt(page || '1', 10));
-    const limitNum = Math.min(50, Math.max(1, parseInt(limit || '10', 10)));
-
-    const isPublished = !(all === 'true' && userId);
-
-    return this.postsService.getPostsPaginated(pageNum, limitNum, isPublished, userRole);
+    return this.postsService.getPostsPaginated(filter.page, filter.limit, true);
   }
 
   @Get('search/semantic')
@@ -73,18 +64,16 @@ export class PostsController {
 
   @Get(':slug')
   @Public()
-  @UseGuards(AtGuard)
   async getPostBySlug(
     @Param('slug') slug: string,
-    @User('role') userRole?: string,
   ): Promise<PostResponseDto> {
-    return this.postsService.getPostBySlug(slug, userRole);
+    return this.postsService.getPostBySlug(slug);
   }
 
   @Patch(':id')
   @HttpCode(HttpStatus.OK)
   @UseGuards(AtGuard, OwnershipGuard)
-  @Throttle({ default: { limit: 20, ttl: 3600 } }) 
+  @Throttle({ default: { limit: 20, ttl: 3600 } })
   async updatePost(
     @Param('id') id: string,
     @Body() dto: UpdatePostDto,
